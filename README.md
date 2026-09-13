@@ -4,23 +4,26 @@ Two Logitech gaming keyboards, the **G510s** and the **G910 Orion
 Spectrum** — same family, same era, same problem: nothing on Linux
 actually drives their hardware properly. Logitech's own software
 (G HUB / Logitech Gaming Software) is Windows-only, and the community
-tools that exist for keyboards like these are old, unmaintained, and
-get real things wrong (see "Why This Doesn't Use g15daemon" below for
-one concrete example: wrong key table, broken media keys). So instead
-of working around that, this repo talks to each keyboard's real
-hardware protocol directly and builds the control software ourselves —
-one app per keyboard, both born the same way: read the actual USB/HID
-traffic, verify every assumption against the real device, never guess.
+tools that exist for keyboards like these are old and unmaintained.
 
-The G510s app drives its LCD, buttons, backlight, and macro keys. The
-G910 app drives its per-key RGB lighting and macro keys. Different
-feature sets because the keyboards are different, but the same
-approach and the same standard: nothing shipped here was assumed to
-work — it was tested on the real hardware first.
+Here's the annoying bit: even back on Windows, proper software for the
+G510s's little LCD screen was never easy to find — half of what's out
+there is abandoned or just doesn't work right anymore. So when it came
+to Linux, there was nothing at all. Bugger all. Same story with the
+G910's per-key RGB lighting — no real Linux option, full stop.
 
-Everything here runs as a normal user (no root needed at runtime),
-starts automatically at login, and survives reboots/replugs/kernel
-updates.
+So we sorted it ourselves. This repo talks to each keyboard's actual
+hardware directly (real USB/HID traffic, not a guess at what "should"
+work) and builds the control software from scratch — one app per
+keyboard. The G510s app drives its LCD, buttons, backlight, and macro
+keys. The G910 app drives its per-key RGB lighting and macro keys.
+Different keyboards, different jobs, but the same rule for both:
+nothing went in until it was actually tested and working on the real
+keyboard, not just assumed to.
+
+Both apps run as your normal user — no faffing about with root — start
+themselves up at login, and just keep working through reboots,
+replugs, and kernel updates.
 
 ## The two apps
 
