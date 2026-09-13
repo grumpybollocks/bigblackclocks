@@ -1,5 +1,4 @@
-G910 Orion Spectrum Control App -- Planning Notes
-==================================================
+# G910 Orion Spectrum Control App -- Planning Notes
 Branch: g910-macros (started as an untouched copy of `main`, the G510s
 LCD app -- diverging from here). This file documents the G910 project
 specifically; README.txt in this same repo is the G510s LCD project's
@@ -19,8 +18,7 @@ this was the last major open unknown and it's now resolved). What
 remains is writing the actual g910_app.py / macro daemon / systemd
 service -- see NEXT STEPS at the end of this file.
 
-WHAT THIS IS SUPPOSED TO BECOME
---------------------------------
+## WHAT THIS IS SUPPOSED TO BECOME
 Same kind of app as g510_app.py (PyQt5, one window, QTabWidget,
 tab-per-feature) but for a Logitech G910 Orion Spectrum keyboard
 instead of a G510s. Two tabs only, no LCD tab (G910 has no screen):
@@ -33,8 +31,7 @@ instead of a G510s. Two tabs only, no LCD tab (G910 has no screen):
     MR as a 4th M-profile, which is what one of the reference projects
     below does by default).
 
-HARDWARE FACTS -- CONFIRMED EMPIRICALLY on ac130arch (2026-09-13)
---------------------------------------------------------------------
+## HARDWARE FACTS -- CONFIRMED EMPIRICALLY on ac130arch (2026-09-13)
 Do NOT re-derive these, they were checked directly on the real device,
 not assumed:
 - USB ID 046d:c335, lsusb identifies it as "G910 Orion Spectrum
@@ -63,8 +60,7 @@ not assumed:
   PyQt5 usage is already proven via the sibling g510_app.py.
 - `yay` is available as the AUR helper.
 
-GITHUB ACCESS -- SET UP 2026-09-13
-------------------------------------
+## GITHUB ACCESS -- SET UP 2026-09-13
 This machine (ac130arch) did NOT have GitHub SSH access before this
 project -- the only existing key (~/.ssh/id_ed25519, comment
 "ac130arch-to-tria") is for the separate Arch-to-Arch cross-machine
@@ -79,8 +75,7 @@ Verified working: `ssh -T git@github.com` returns "Hi grumpybollocks!
 You've successfully authenticated". Don't recreate this key or config
 -- it's done.
 
-DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
--------------------------------------------------------------------
+## DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
 - MR key = literal macro-record toggle. CONFIRMED user decision.
 - SUPERSEDED: the earlier lean toward `g810-led` for the Backlight tab
   is WRONG and must not be used -- confirmed via the AUR RPC API that
@@ -142,28 +137,50 @@ DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
   forum-confirmed option to fall back to if keyleds' G910 G-key
   support turns out incomplete on real hardware.
 
-FINAL DEPENDENCY LIST (from real AUR RPC data, not guessed)
-----------------------------------------------------------------
+## FINAL DEPENDENCY LIST (from real AUR RPC data, not guessed)
 `keyleds` AUR package Depends: libevdev, libuv, libx11, libxi,
 libyaml, luajit, systemd-libs. MakeDepends: cmake. License GPL-3.0.
 All ordinary Arch extra/core packages, no exotic transitive AUR chain.
 
-ONE-SHOT INSTALL COMMAND (paste once, nothing else needed)
-----------------------------------------------------------------
-sudo pacman -S --needed base-devel git cmake libevdev libuv libx11 libxi libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus && \
-yay -S --needed keyleds
+## INSTALL SCRIPT: ./install-g910.sh (added 2026-09-14)
+Actual runnable script now, not just a pasted command -- mirrors the
+sibling G510s project's install.sh style (numbered steps, safe to
+re-run, --needed everywhere so it just skips what's already there).
+Separate script from install.sh on purpose (that one is the G510s
+project, different hardware/deps entirely).
+
+Equivalent to the one-shot command that was originally pasted here and
+confirmed working on 2026-09-13:
+  sudo pacman -S --needed base-devel git cmake libevdev libuv libx11 \
+      libxi libyaml luajit systemd-libs python-pyqt5 python-evdev python-dbus
+  yay -S --needed keyleds
 
 (base-devel/git/cmake = AUR build tooling; the rest are keyleds's own
 Depends, pre-installed via pacman so yay won't prompt mid-build.
 python-pyqt5/python-evdev already proven via the G510s app. python-dbus
-included in case the G910 app ends up talking to keyledsd over DBUS
-rather than its Cython bindings. yay -S keyleds compiles from source
-via cmake -- expect a short wait, not instant. No reboot needed; the
-udev rule takes effect on replug, or `sudo udevadm control --reload`
-+ replug if it doesn't pick up live.)
+turned out to NOT actually be needed by the final architecture -- this
+project ended up bypassing keyledsd entirely, reading hidraw directly
+and using keyledsctl/libkeyleds.so via ctypes instead -- kept anyway
+since it was part of the original confirmed-working install and costs
+nothing to have. yay -S keyleds compiles from source via cmake --
+expect a short wait, not instant. No reboot needed; the udev rule
+takes effect on replug, or `sudo udevadm control --reload` + replug if
+it doesn't pick up live.)
 
-INSTALL CONFIRMED (2026-09-13)
-----------------------------------
+UPDATE (2026-09-14): added `ydotool` to the script -- the macro
+daemon's (`g910_macro_daemon.py`, on the `g910-canvas` branch) replay
+mechanism, same as the sibling G510s project already uses. Official
+`extra` repo, not AUR -- confirmed via `pacman -Si`/`pacman -Fl` before
+adding it, not assumed missing-then-guessed-present. This was a real
+gap: the daemon code was written and committed before checking whether
+`ydotool` was actually installed, and it was not -- caught via a
+direct `which ydotool` check before ever running the daemon live.
+Ships both the `ydotool` client and `ydotoold` background daemon it
+needs, plus its own systemd --user service unit and udev rule for
+uinput permissions already -- install-g910.sh now also runs
+`systemctl --user enable --now ydotool.service` as its final step.
+
+## INSTALL CONFIRMED (2026-09-13)
 User ran the one-shot install command. Verified via `pacman -Qi
 keyleds`: version 1.2.0-1, all Depends satisfied, installed cleanly.
 Binaries present: /usr/bin/keyledsctl, /usr/bin/keyledsd. Confirmed
@@ -194,8 +211,7 @@ Binaries present: /usr/bin/keyledsctl, /usr/bin/keyledsd. Confirmed
   are controlled via separate dedicated functions, not the block-color
   system. See M-KEY/MR INDICATOR LED CONTROL section below.)
 
-G-KEY/M-KEY/MR PROTOCOL -- FULLY CONFIRMED VIA REAL RAW CAPTURE
---------------------------------------------------------------------
+## G-KEY/M-KEY/MR PROTOCOL -- FULLY CONFIRMED VIA REAL RAW CAPTURE
 This was the single biggest open unknown and it is now COMPLETELY
 resolved, not guessed. Method: a small non-exclusive hidraw reader
 (os.open/os.read, no libusb, no detach_kernel_driver -- same low-risk
@@ -245,8 +261,7 @@ run at daemon startup (systemd service ExecStartPre, or first line of
 the daemon itself) every time, since it's a live device-mode toggle,
 not a persisted setting.
 
-ARCHITECTURE REVISION based on this confirmed data
--------------------------------------------------------
+## ARCHITECTURE REVISION based on this confirmed data
 Since the exact report format is now fully known and verified, the
 G-Keys tab does NOT need keyledsd (the background daemon) running at
 all -- and there's good reason to avoid it: keyledsd has its own real,
@@ -311,8 +326,7 @@ RESOLVED UNKNOWNS from the previous research pass:
      revision -- we're not using keyledsd's X-focus-based profile
      switching, so this doesn't affect the plan either way.
 
-M-KEY/MR INDICATOR LED CONTROL -- CONFIRMED WORKING (2026-09-13)
-----------------------------------------------------------------------
+## M-KEY/MR INDICATOR LED CONTROL -- CONFIRMED WORKING (2026-09-13)
 User noticed M1/M2/M3/MR indicator LEDs weren't lit and asked whether
 this was the same class of bug as the G510s's M-key LED fix. It is
 NOT the same bug -- confirmed by research before touching anything:
@@ -421,8 +435,7 @@ and checked what was actually tested vs. merely asserted:
     every startup regardless, so this doesn't change the plan, just
     noting it's an inference, not a directly observed fact.
 
-NEXT STEPS (in order)
-------------------------
+## NEXT STEPS (in order)
 1. Write g910_app.py (Backlight tab using `keyledsctl set-leds`/
    `get-leds` against LED block 01 only -- 105 keys, true per-key RGB
    -- then G-Keys tab), reusing g510_app.py's
@@ -442,3 +455,197 @@ NEXT STEPS (in order)
    anything "done" (per this whole repo's established standard: don't
    claim something works without it being physically confirmed by the
    user on the actual device).
+
+HID++ FEATURE MAP -- FULLY IDENTIFIED (2026-09-13/14, canvas-plan
+research), mandatory cross-post from the g910-canvas-rearchitect
+branch per the user's instruction that everything learned updates the
+## main skeleton, not just a side branch.
+Raw feature list from `keyledsctl info -d /dev/hidraw1`:
+  [0001, 0003, 4522, 0005, 1e00, 4540, 1eb0, 8010, 8020, 8030, 8060,
+   00c1, 1801, 1802, 8080, 8070, 1821]
+Mapped against libkeyleds' own real header
+(libkeyleds/include/keyleds/features.h, from the same compiled source
+tarball used in the earlier audit -- not guessed):
+  0001 = FEATURE            0003 = VERSION           0005 = NAME
+  4522 = GAMEMODE           4540 = KEYBOARD_LAYOUT_2  00c1 = DFU_CONTROL
+  8010 = GKEYS              8020 = MKEYS              8030 = MRKEYS
+  8060 = REPORTRATE         8080 = LEDS (the static per-key color
+                             feature we've been using this whole
+                             project, via feature_leds.c/keyledsctl)
+  8070 = LED_EFFECTS (separate from LEDS -- see below, NOT what we've
+                       been using, previously and WRONGLY assumed by
+                       the assistant to be the same as 8080 or to not
+                       exist -- corrected here)
+
+CORRECTION to an earlier mistake: at one point this session the
+assistant said "0x8070 = leds" -- that was backwards, caught while
+reading the real header directly instead of relying on memory.
+0x8080 = LEDS, 0x8070 = LED_EFFECTS. Keep this straight for any future
+protocol work.
+
+STILL UNIDENTIFIED by libkeyleds' own header (not in features.h at
+all): 1e00, 1eb0, 1801, 1802, 1821. Researched via web search (not
+guessed): on OTHER Logitech devices (G402 mouse, MX Master 3S) these
+same five IDs appear as "hidden" features. ONE OF THEM IS DANGEROUS,
+CONFIRMED BY A REAL SOURCE: 0x1802 = DEVICE RESET, explicitly flagged
+by other researchers as excluded from automated feature-probing sweeps
+because of what it does. DO NOT call/probe 0x1802 on this device. The
+other four (1e00, 1eb0, 1801, 1821) remain genuinely unidentified --
+not researched further yet, not assumed to be safe or relevant.
+
+FEATURE 0x8070 (LED_EFFECTS) -- REAL, DETAILED THIRD-PARTY SPEC FOUND,
+NOT YET VERIFIED ON THIS HARDWARE:
+Found a real, detailed HID++ 2.0 protocol writeup for this feature
+(openlogi.org/hidpp/features/x8070-color-led-effects) -- NOT
+implemented anywhere in libkeyleds (confirmed: no feature_led_effects.c
+or any 0x8070 reference exists in the whole keyleds-1.2.0 source tree).
+If accurate for this exact keyboard, this would be a genuine per-zone
+HARDWARE-SIDE effects engine (Disabled/FixedColor/PulsingBreathing/
+Cycling/ColorWave/Starlight/LightOnPress/BootUp/DemoMode/Ripple, effect
+IDs 0-11) with a persistence model (Volatile/VolatileAndNonVolatile/
+NonVolatileOnly -- the non-volatile options write to EEPROM, meaning
+colors/effects COULD survive power cycles at the firmware level if
+this works as documented). This would be a fundamentally better answer
+than anything considered so far for BOTH the "effects" feature request
+AND the reboot-persistence open question from the canvas plan --
+better than running keyledsd (which we already ruled out for real
+bugs) or a host-side software color-cycling loop.
+CAVEATS, stated honestly, not swept under the rug:
+- This is THIRD-PARTY reverse-engineering documentation, not Logitech's
+  own spec, and not yet tested against this specific G910 unit's
+  firmware at all.
+- The source document itself does not confirm G-series gaming
+  keyboards are covered by this feature description -- it says
+  "Logitech keyboards and mice" generally, without listing this model.
+- Nothing has been sent to feature 0x8070 on the real device yet. Any
+  actual use requires: (a) a safe READ-ONLY probe first (get_info,
+  function index 0, 3-byte short request) to see if the response shape
+  matches the documented format at all, before trusting any of the
+  write-side functions (set_zone_effect etc.), and (b) doing that probe
+  with the user's awareness/go-ahead first, same discipline as every
+  other write to this device throughout this project.
+- libkeyleds has zero code for this feature, so using it would mean
+  either implementing the raw HID++ calls ourselves (ctypes + manual
+  report construction, following the same report format already
+  reverse-engineered for reading gkeys/mkeys/mrkeys earlier in this
+  project) or finding another existing tool that already implements
+  0x8070 correctly.
+NEXT STEP if this gets pursued: a read-only get_info probe on
+/dev/hidraw1, reported back before anything else is attempted.
+
+FEATURE 0x8070 -- CONFIRMED REAL AND WORKING ON THIS EXACT HARDWARE
+## (2026-09-14), READ-ONLY PROBES ONLY, NOTHING WRITTEN TO THE DEVICE YET
+The "next step" above was carried out. Method, precise, not guessed:
+cross-referenced two independent real sources first (a documented
+third-party spec, openlogi.org, AND libratbag's actual production C
+implementation, github.com/libratbag/libratbag src/hidpp20.c/.h --
+the second one confirmed this isn't just theoretical, it's real code
+running against real Logitech hardware today via Piper). Got the exact
+byte layout from libratbag's source rather than assume anything:
+REPORT_ID_SHORT=0x10, REPORT_ID_LONG=0x11 (from src/hidpp-generic.h),
+CMD_COLOR_LED_EFFECTS_GET_INFO=0x00, GET_ZONE_INFO=0x10 (from
+hidpp20.c), and the exact struct layouts from hidpp20.h.
+
+Reused proven, already-tested code where possible rather than
+reinvent: called the PUBLICLY EXPORTED `keyleds_get_feature_index()`
+from libkeyleds.so (the same library already used successfully for the
+M-key LED fix) via ctypes to resolve 0x8070's real per-device
+feature-index slot -- confirmed keyleds_call() itself (the library's
+internal generic request function) is NOT publicly exported, so the
+actual GET_INFO/GET_ZONE_INFO requests were constructed by hand as raw
+HID++ short reports and sent via a plain os.write()/os.read() on
+/dev/hidraw1 -- same non-exclusive hidraw approach already proven
+throughout this project, nothing new architecturally.
+
+RESULTS, verified against the real struct field order in libratbag's
+header (byte-by-byte, not assumed):
+  GET_INFO reply: zone_count=2, nv_capabilities=0x0001 (bit0 =
+    BOOT_UP_EFFECT supported per the spec's bitmask), ext_capabilities
+    =0x0000 (no extended capability flags set).
+  GET_ZONE_INFO zone 0: location=1 (PRIMARY -- the main keyboard),
+    num_effects=6, persistency_caps=0x00.
+  GET_ZONE_INFO zone 1: location=2 (LOGO), num_effects=4,
+    persistency_caps=0x00.
+So: this exact G910 Orion Spectrum genuinely has a working,
+responsive, real hardware-side effects engine via feature 0x8070,
+covering the Primary (main board) zone with 6 effects and the Logo
+zone with 4 effects. This is a real, confirmed capability, not
+speculation -- the device answered with correctly-structured data
+matching the documented protocol precisely.
+
+A REAL MISTAKE MADE AND CAUGHT WHILE DOING THIS, kept here honestly
+rather than silently fixed: the first version of the zone-info probe
+script mis-indexed the reply bytes (forgot the zone_info struct's
+leading `index` echo byte shifts every subsequent field over by one),
+so its first printed output mislabeled `num_effects` as
+`persistency_caps`. Caught by going back and reading the EXACT struct
+field order from libratbag's header (`index, location(BE16),
+num_effects, persistency_caps`) instead of trusting the quick script's
+first pass -- the numbers above are the corrected, struct-verified
+ones. Lesson: when parsing an unfamiliar binary reply, get the exact
+field layout from source first, don't reason about byte offsets from
+memory alone, even when the request format itself is already confirmed
+correct (the request worked fine; the mistake was only in interpreting
+the reply).
+
+WHAT'S STILL NOT KNOWN, explicitly, not swept under the rug:
+- WHICH of the 6 Primary-zone / 4 Logo-zone effects are which (effect
+  IDs, via GET_ZONE_EFFECT_INFO per zone+effect index) -- not yet
+  queried. Next safe read-only step if this is pursued further.
+- What persistency_caps=0x00 on both zones actually means for surviving
+  reboots in practice -- the enum in libratbag's header suggests
+  "unsupported" but this hasn't been tested against a real reboot, and
+  the field's exact semantics for THIS firmware aren't confirmed by a
+  primary source, only inferred from a general enum used across many
+  different Logitech devices.
+- Nothing has been WRITTEN to feature 0x8070 yet -- no set_zone_effect
+  call has been attempted. All probes so far are 100% read-only.
+- Feature 0x1802 (DEVICE RESET, see the feature map section above)
+  remains untouched and off-limits.
+
+FULL EFFECT CATALOG PER ZONE -- CONFIRMED VIA GET_ZONE_EFFECT_INFO
+(2026-09-14), still 100% read-only, nothing written:
+Queried every effect slot for both zones (request: function 0x20,
+params[0]=zone_index, params[1]=zone_effect_index; reply struct per
+libratbag's header: zone_index, zone_effect_index, effect_id(BE16),
+effect_caps(BE16), effect_period(BE16)).
+
+  Zone 0 (Primary, main board), 6 effects:
+    slot 0: Disabled            caps=0x0000 period=0ms
+    slot 1: Fixed (solid color) caps=0x0005 period=0ms
+    slot 2: Breathing           caps=0xc001 period=992ms
+    slot 3: Cycling             caps=0xc001 period=992ms
+    slot 4: Wave                caps=0xdce1 period=30ms
+    slot 5: Starlight           caps=0x0000 period=0ms
+  Zone 1 (Logo), 4 effects:
+    slot 0: Disabled            caps=0x0000 period=0ms
+    slot 1: Fixed (solid color) caps=0x0005 period=0ms
+    slot 2: Breathing           caps=0xc001 period=992ms
+    slot 3: Cycling             caps=0xc001 period=992ms
+    (no Wave/Starlight on the Logo zone -- makes sense, single small
+    zone, those effects need more physical area to read as intended)
+
+This is a real, confirmed, hardware-side effects engine on this exact
+keyboard -- genuine Breathing/Cycling/Wave/Starlight, running entirely
+on the device's own firmware, no keyledsd or any host daemon needed at
+all. Directly answers the original "effects" request from early in
+this project's planning far better than anything considered before
+(keyledsd was ruled out for real bugs; a host-side software color-loop
+was the fallback plan) -- IF the write side (set_zone_effect) actually
+works as documented once tested, which it has NOT been yet.
+
+`effect_caps` bit meanings not yet decoded (would need either more
+libratbag source reading or empirical bit-flipping against a real
+set_zone_effect call to infer, neither done yet). `effect_period` is
+likely the effect's natural animation cycle length in milliseconds
+where applicable (Breathing/Cycling both report 992ms, Wave reports a
+much faster 30ms) -- plausible reading, not confirmed against a
+primary source.
+
+NEXT STEP if this gets pursued further: an actual set_zone_effect
+write call -- e.g. setting zone 0 to effect slot 1 (Fixed) with a
+specific RGB color, the safest possible first write since it's
+equivalent to something already proven safe via the "leds" feature's
+static colors, just through a different feature. Requires the user's
+explicit go-ahead first, same as every other write to this device
+throughout this project -- not yet attempted.
