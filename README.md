@@ -23,50 +23,54 @@ keyboard, not just assumed to.
 
 Both apps run as your normal user — no faffing about with root — start
 themselves up at login, and just keep working through reboots,
-replugs, and kernel updates.
+replugs, and kernel updates. Does what it says on the tin.
 
 ## The two apps
 
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
-| **G510s** | `main` (this branch) | LCD stats screen (CPU/RAM/VRAM/temps) with a custom AIDA64-style dashboard builder for the L2-L5 buttons, RGB backlight control, G-key macro recording with M1-M3 profiles. Tagged `v1.0`, actively maintained. Full technical deep-dive is the rest of this file. |
-| **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | Single-view GUI built on a real per-key-geometry canvas render of the keyboard: full RGB control (per-key, per-zone, and whole-board), clickable M1/M2/M3/MR cells right on the canvas that mirror the physical keys, G-key macro recording, save/load full lighting profiles, systemd macro daemon. Reboot-safe (stable udev device paths, not raw `hidrawN` numbers) with its own installer + desktop launcher. Reached its `g910-gui-v1` milestone (tag), actively maintained — not yet merged to main. Full technical deep-dive: [`G910_README.md`](../../blob/g910-canvas/G910_README.md) and [`G910_CANVAS_PLAN.md`](../../blob/g910-canvas/G910_CANVAS_PLAN.md) on that branch. |
+| **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons (AIDA64 style), does the RGB backlight, and handles G-key macros across M1-M3 profiles. Tagged `v1.0`, still gets looked after. |
+| **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. Handles G-key macros, saving/loading whole lighting setups, and won't get confused after a reboot (device paths are pinned down properly, not left to chance). Comes with its own installer and a desktop shortcut. Hit its `g910-gui-v1` milestone and still being fussed over — hasn't made its way to `main` yet. |
 
 ### Screenshots
 
-**G910 Control** — the app described above: keyboard canvas in the
-middle (click any key to color it, click a cluster to select its zone
-in the sidebar, M1/M2/M3/MR are real clickable cells), Color Mode
-sidebar on the left, G-Keys macro strip under the keyboard, saved
-lighting Profiles on the right.
+**G910 Control** — the app described above: the keyboard render sits in
+the middle (click a key to colour it, click a cluster to pick its zone
+in the sidebar, M1/M2/M3/MR are properly clickable), Colour Mode
+sidebar on the left, G-Keys macro strip tucked under the keyboard, and
+your saved lighting Profiles on the right.
 
 ![G910 Control app — v1](docs/screenshots/g910-control-v1.png)
 
-*(G510s app screenshot coming soon.)*
+*(G510s screenshot on the way — watch this space.)*
 
-Other branches: `legacy-yad-backlight-script` freezes the original
-yad/bash G510s backlight tool as a standalone reference (superseded by
-`g510_app.py`'s Backlight tab); `g910` is the G910 app's pre-canvas
-history, kept as-is.
+A couple of other branches knocking about: `legacy-yad-backlight-script`
+keeps the original yad/bash backlight script around for old times'
+sake (the G510s app's Backlight tab does the job properly now), and
+`g910` is what the G910 app looked like before the canvas rewrite —
+left as-is for the history.
 
-Fresh-install setup for the G510s app: run `./install.sh` (installs
-every dependency, places system files, compiles, enables services —
-see that file for the one thing it CAN'T automate: sourcing your own
-Eurostile Bold font). The G910 app has its own `install-g910.sh` on
-the `g910-canvas` branch.
+Want to actually run the G510s app? `./install.sh` sorts out every
+dependency, drops the system files where they need to go, builds
+everything, and switches the services on — the one thing it can't do
+for you is track down your own copy of the Eurostile Bold font (that's
+a licensing thing, not a laziness thing). The G910 app's got its own
+installer, `install-g910.sh`, over on the `g910-canvas` branch.
 
 ---
 
-## G510s: quick summary
+## G510s: the short version
 
-PyQt5 app (`g510_app.py`) that turns the keyboard's built-in LCD into
-a live CPU/RAM/VRAM/TEMP display (plus a custom AIDA64-style dashboard
-builder for the L2-L5 screens), wires up the 5 buttons under it, and
-adds RGB backlight control + G-key macro recording with M1-M3
-profiles. Talks directly to `/dev/g510-lcd`/`/dev/g510-keys` (stable
-udev symlinks) instead of the buggy `g15daemon` community tool. Runs
-as 3 systemd `--user` services, autostarts at login, survives
-reboots/replugs. Tagged `v1.0`.
+A PyQt5 app (`g510_app.py`) that turns the keyboard's built-in screen
+into a live CPU/RAM/VRAM/TEMP display, with a dashboard builder for
+the L2-L5 buttons if you fancy making your own layouts. Also does the
+RGB backlight and G-key macros across M1-M3 profiles. Talks straight to
+`/dev/g510-lcd` and `/dev/g510-keys` (proper stable symlinks, not
+flaky device numbers) instead of relying on `g15daemon`, which gets
+the key mappings wrong on this keyboard. Runs quietly as three systemd
+`--user` services, starts itself at login, shrugs off reboots. Tagged
+`v1.0`.
 
-Full technical deep-dive (protocol details, bug history, build
-gotchas, font conversion, udev rules): [`G510_README.md`](G510_README.md).
+Want the full story — protocol details, every bug we hit and how it
+got fixed, the font conversion faff, the udev rules? That's all in
+[`G510_README.md`](G510_README.md).
