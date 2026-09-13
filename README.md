@@ -29,6 +29,8 @@ updates.
 | **G510s** | `main` (this branch) | LCD stats screen (CPU/RAM/VRAM/temps) with a custom AIDA64-style dashboard builder for the L2-L5 buttons, RGB backlight control, G-key macro recording with M1-M3 profiles. Tagged `v1.0`, actively maintained. Full technical deep-dive is the rest of this file. |
 | **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | Single-view GUI built on a real per-key-geometry canvas render of the keyboard: full RGB control (per-key, per-zone, and whole-board), clickable M1/M2/M3/MR cells right on the canvas that mirror the physical keys, G-key macro recording, save/load full lighting profiles, systemd macro daemon. Reboot-safe (stable udev device paths, not raw `hidrawN` numbers) with its own installer + desktop launcher. Reached its `g910-gui-v1` milestone (tag), actively maintained — not yet merged to main. Full technical deep-dive: [`G910_README.md`](../../blob/g910-canvas/G910_README.md) and [`G910_CANVAS_PLAN.md`](../../blob/g910-canvas/G910_CANVAS_PLAN.md) on that branch. |
 
+![G910 Control app — v1](docs/screenshots/g910-control-v1.png)
+
 Other branches: `legacy-yad-backlight-script` freezes the original
 yad/bash G510s backlight tool as a standalone reference (superseded by
 `g510_app.py`'s Backlight tab); `g910` is the G910 app's pre-canvas
