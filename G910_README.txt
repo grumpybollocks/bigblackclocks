@@ -174,6 +174,19 @@ expect a short wait, not instant. No reboot needed; the udev rule
 takes effect on replug, or `sudo udevadm control --reload` + replug if
 it doesn't pick up live.)
 
+UPDATE (2026-09-14): added `ydotool` to the script -- the macro
+daemon's (`g910_macro_daemon.py`, on the `g910-canvas` branch) replay
+mechanism, same as the sibling G510s project already uses. Official
+`extra` repo, not AUR -- confirmed via `pacman -Si`/`pacman -Fl` before
+adding it, not assumed missing-then-guessed-present. This was a real
+gap: the daemon code was written and committed before checking whether
+`ydotool` was actually installed, and it was not -- caught via a
+direct `which ydotool` check before ever running the daemon live.
+Ships both the `ydotool` client and `ydotoold` background daemon it
+needs, plus its own systemd --user service unit and udev rule for
+uinput permissions already -- install-g910.sh now also runs
+`systemctl --user enable --now ydotool.service` as its final step.
+
 INSTALL CONFIRMED (2026-09-13)
 ----------------------------------
 User ran the one-shot install command. Verified via `pacman -Qi
