@@ -1,5 +1,4 @@
-G910 Orion Spectrum Control App -- Planning Notes
-==================================================
+# G910 Orion Spectrum Control App -- Planning Notes
 Branch: g910-macros (started as an untouched copy of `main`, the G510s
 LCD app -- diverging from here). This file documents the G910 project
 specifically; README.txt in this same repo is the G510s LCD project's
@@ -19,8 +18,7 @@ this was the last major open unknown and it's now resolved). What
 remains is writing the actual g910_app.py / macro daemon / systemd
 service -- see NEXT STEPS at the end of this file.
 
-WHAT THIS IS SUPPOSED TO BECOME
---------------------------------
+## WHAT THIS IS SUPPOSED TO BECOME
 Same kind of app as g510_app.py (PyQt5, one window, QTabWidget,
 tab-per-feature) but for a Logitech G910 Orion Spectrum keyboard
 instead of a G510s. Two tabs only, no LCD tab (G910 has no screen):
@@ -33,8 +31,7 @@ instead of a G510s. Two tabs only, no LCD tab (G910 has no screen):
     MR as a 4th M-profile, which is what one of the reference projects
     below does by default).
 
-HARDWARE FACTS -- CONFIRMED EMPIRICALLY on ac130arch (2026-09-13)
---------------------------------------------------------------------
+## HARDWARE FACTS -- CONFIRMED EMPIRICALLY on ac130arch (2026-09-13)
 Do NOT re-derive these, they were checked directly on the real device,
 not assumed:
 - USB ID 046d:c335, lsusb identifies it as "G910 Orion Spectrum
@@ -63,8 +60,7 @@ not assumed:
   PyQt5 usage is already proven via the sibling g510_app.py.
 - `yay` is available as the AUR helper.
 
-GITHUB ACCESS -- SET UP 2026-09-13
-------------------------------------
+## GITHUB ACCESS -- SET UP 2026-09-13
 This machine (ac130arch) did NOT have GitHub SSH access before this
 project -- the only existing key (~/.ssh/id_ed25519, comment
 "ac130arch-to-tria") is for the separate Arch-to-Arch cross-machine
@@ -79,8 +75,7 @@ Verified working: `ssh -T git@github.com` returns "Hi grumpybollocks!
 You've successfully authenticated". Don't recreate this key or config
 -- it's done.
 
-DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
--------------------------------------------------------------------
+## DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
 - MR key = literal macro-record toggle. CONFIRMED user decision.
 - SUPERSEDED: the earlier lean toward `g810-led` for the Backlight tab
   is WRONG and must not be used -- confirmed via the AUR RPC API that
@@ -142,14 +137,12 @@ DECISIONS -- FINALIZED after a deep research pass (2026-09-13)
   forum-confirmed option to fall back to if keyleds' G910 G-key
   support turns out incomplete on real hardware.
 
-FINAL DEPENDENCY LIST (from real AUR RPC data, not guessed)
-----------------------------------------------------------------
+## FINAL DEPENDENCY LIST (from real AUR RPC data, not guessed)
 `keyleds` AUR package Depends: libevdev, libuv, libx11, libxi,
 libyaml, luajit, systemd-libs. MakeDepends: cmake. License GPL-3.0.
 All ordinary Arch extra/core packages, no exotic transitive AUR chain.
 
-INSTALL SCRIPT: ./install-g910.sh (added 2026-09-14)
-----------------------------------------------------------------
+## INSTALL SCRIPT: ./install-g910.sh (added 2026-09-14)
 Actual runnable script now, not just a pasted command -- mirrors the
 sibling G510s project's install.sh style (numbered steps, safe to
 re-run, --needed everywhere so it just skips what's already there).
@@ -187,8 +180,7 @@ needs, plus its own systemd --user service unit and udev rule for
 uinput permissions already -- install-g910.sh now also runs
 `systemctl --user enable --now ydotool.service` as its final step.
 
-INSTALL CONFIRMED (2026-09-13)
-----------------------------------
+## INSTALL CONFIRMED (2026-09-13)
 User ran the one-shot install command. Verified via `pacman -Qi
 keyleds`: version 1.2.0-1, all Depends satisfied, installed cleanly.
 Binaries present: /usr/bin/keyledsctl, /usr/bin/keyledsd. Confirmed
@@ -219,8 +211,7 @@ Binaries present: /usr/bin/keyledsctl, /usr/bin/keyledsd. Confirmed
   are controlled via separate dedicated functions, not the block-color
   system. See M-KEY/MR INDICATOR LED CONTROL section below.)
 
-G-KEY/M-KEY/MR PROTOCOL -- FULLY CONFIRMED VIA REAL RAW CAPTURE
---------------------------------------------------------------------
+## G-KEY/M-KEY/MR PROTOCOL -- FULLY CONFIRMED VIA REAL RAW CAPTURE
 This was the single biggest open unknown and it is now COMPLETELY
 resolved, not guessed. Method: a small non-exclusive hidraw reader
 (os.open/os.read, no libusb, no detach_kernel_driver -- same low-risk
@@ -270,8 +261,7 @@ run at daemon startup (systemd service ExecStartPre, or first line of
 the daemon itself) every time, since it's a live device-mode toggle,
 not a persisted setting.
 
-ARCHITECTURE REVISION based on this confirmed data
--------------------------------------------------------
+## ARCHITECTURE REVISION based on this confirmed data
 Since the exact report format is now fully known and verified, the
 G-Keys tab does NOT need keyledsd (the background daemon) running at
 all -- and there's good reason to avoid it: keyledsd has its own real,
@@ -336,8 +326,7 @@ RESOLVED UNKNOWNS from the previous research pass:
      revision -- we're not using keyledsd's X-focus-based profile
      switching, so this doesn't affect the plan either way.
 
-M-KEY/MR INDICATOR LED CONTROL -- CONFIRMED WORKING (2026-09-13)
-----------------------------------------------------------------------
+## M-KEY/MR INDICATOR LED CONTROL -- CONFIRMED WORKING (2026-09-13)
 User noticed M1/M2/M3/MR indicator LEDs weren't lit and asked whether
 this was the same class of bug as the G510s's M-key LED fix. It is
 NOT the same bug -- confirmed by research before touching anything:
@@ -446,8 +435,7 @@ and checked what was actually tested vs. merely asserted:
     every startup regardless, so this doesn't change the plan, just
     noting it's an inference, not a directly observed fact.
 
-NEXT STEPS (in order)
-------------------------
+## NEXT STEPS (in order)
 1. Write g910_app.py (Backlight tab using `keyledsctl set-leds`/
    `get-leds` against LED block 01 only -- 105 keys, true per-key RGB
    -- then G-Keys tab), reusing g510_app.py's
@@ -471,8 +459,7 @@ NEXT STEPS (in order)
 HID++ FEATURE MAP -- FULLY IDENTIFIED (2026-09-13/14, canvas-plan
 research), mandatory cross-post from the g910-canvas-rearchitect
 branch per the user's instruction that everything learned updates the
-main skeleton, not just a side branch.
--------------------------------------------------------------------------
+## main skeleton, not just a side branch.
 Raw feature list from `keyledsctl info -d /dev/hidraw1`:
   [0001, 0003, 4522, 0005, 1e00, 4540, 1eb0, 8010, 8020, 8030, 8060,
    00c1, 1801, 1802, 8080, 8070, 1821]
@@ -547,8 +534,7 @@ NEXT STEP if this gets pursued: a read-only get_info probe on
 /dev/hidraw1, reported back before anything else is attempted.
 
 FEATURE 0x8070 -- CONFIRMED REAL AND WORKING ON THIS EXACT HARDWARE
-(2026-09-14), READ-ONLY PROBES ONLY, NOTHING WRITTEN TO THE DEVICE YET
---------------------------------------------------------------------------
+## (2026-09-14), READ-ONLY PROBES ONLY, NOTHING WRITTEN TO THE DEVICE YET
 The "next step" above was carried out. Method, precise, not guessed:
 cross-referenced two independent real sources first (a documented
 third-party spec, openlogi.org, AND libratbag's actual production C
