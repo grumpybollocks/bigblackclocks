@@ -1,21 +1,56 @@
-# G510s LCD Stats Screen + Buttons + Backlight
+# bigblackclocks
 
-Repo: `github.com/grumpybollocks/bigblackclocks` (pushed via SSH — key already set up on this machine and on GitHub).
+Custom Linux control software for two Logitech gaming keyboards that
+Logitech itself no longer properly supports on Linux, and that no other
+project gets fully right either: the **G510s** (LCD stats screen,
+buttons, backlight, macro keys) and the **G910 Orion Spectrum**
+(per-key RGB, macro keys, lighting profiles). Both were built from
+scratch by reading each keyboard's real protocol directly — no G HUB,
+no Logitech Gaming Software (Windows-only), and no reliance on
+community tools whose bugs turned out to be worse than not having the
+feature at all (see "Why This Doesn't Use g15daemon" below for the
+G510s case).
 
-Branches: `main` (this branch) = the Python app, actively developed.
-`legacy-yad-backlight-script` = the original yad/bash backlight tool, frozen there as a standalone reference — not present on main anymore.
+Everything here runs as a normal user (no root needed at runtime),
+starts automatically at login, and survives reboots/replugs/kernel
+updates.
 
-Fresh-install setup: run `./install.sh` (installs every dependency, places system files, compiles, enables services — see that file for the one thing it CAN'T automate: sourcing your own Eurostile Bold font).
+## The two apps
 
-## STATUS FOR AI AGENTS
+| Keyboard | Branch | What it does |
+| --- | --- | --- |
+| **G510s** | `main` (this branch) | LCD stats screen (CPU/RAM/VRAM/temps) with a custom AIDA64-style dashboard builder for the L2-L5 buttons, RGB backlight control, G-key macro recording with M1-M3 profiles. Tagged `v1.0`, actively maintained. Full technical deep-dive is the rest of this file. |
+| **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | Real per-key-geometry canvas GUI for full RGB control (per-key, per-zone, and whole-board), G-key macro recording with M1-M3 profiles + MR toggle, save/load full lighting profiles, systemd macro daemon. Actively in development — not yet merged to main. Full technical deep-dive: [`G910_README.md`](../../blob/g910-canvas/G910_README.md) and [`G910_CANVAS_PLAN.md`](../../blob/g910-canvas/G910_CANVAS_PLAN.md) on that branch. |
 
-Read this block only, skip the rest unless you need deep detail for actual debugging.
+Other branches: `legacy-yad-backlight-script` freezes the original
+yad/bash G510s backlight tool as a standalone reference (superseded by
+`g510_app.py`'s Backlight tab); `g910` is the G910 app's pre-canvas
+history, kept as-is.
+
+Fresh-install setup for the G510s app: run `./install.sh` (installs
+every dependency, places system files, compiles, enables services —
+see that file for the one thing it CAN'T automate: sourcing your own
+Eurostile Bold font). The G910 app has its own `install-g910.sh` on
+the `g910-canvas` branch.
+
+---
+
+## G510s: full technical reference
+
+Everything below this point is the G510s app's own deep-dive
+documentation (protocol details, bug history, build gotchas) — read it
+if you're actually working on that code. It predates the two-keyboard
+framing above, so it refers to itself as "this project" throughout.
+
+#### Current Status
+
+Skip ahead to a specific section below if you need deep detail on something in particular.
 
 **v1.0 TAGGED** (git tag `v1.0`, pushed). Everything in the v1.0 section below is DONE and confirmed working by the user — don't re-diagnose any of it, only read further sections if something specific is actually broken.
 
 **v1.1 BUILT, NOT YET TAGGED** — code is committed on main, rebuilt binaries are live and running on the real hardware, and everything has been verified by the assistant (compiled clean, ran repeatedly with no crash, output visually inspected pixel-by-pixel). It has NOT yet been physically confirmed by the user on the actual keyboard LCD — don't tag v1.1 or claim it's "done" until that happens.
 
-### What v1.1 adds
+#### What v1.1 adds
 
 A "Custom Screens" tab in `g510_app.py` — an AIDA64-style dashboard builder for the L2-L5 buttons. Pick a screen (L2-L5), add sensors with a display style (Number or Bar) and an X/Y position, see the result in a live preview pane, Remove any element — every change auto-saves immediately (no separate Save button). New sensors beyond the original CPU/RAM/VRAM/CPU-Temp: GPU %, GPU Edge/Hotspot/VRAM temps, Swap %, Disk % (root + the "frigider" drive), Uptime, Network up/down speed, and 6 genuinely-unlabeled motherboard temps (shown honestly as "MB Temp 1..6", not invented names). Layouts are stored in `custom_screens.txt` (plain SCREEN/ELEMENT text lines, no JSON lib needed in C) and rendered by `g510_lcd_stats.c`'s `draw_custom_screen()`.
 
@@ -28,7 +63,7 @@ Two real bugs found and fixed while building this (both matter beyond v1.1, keep
 
 PNG/image placement on custom screens (the OLDER Phase 2 idea, before the user reprioritized) is DEPRIORITIZED, not built into the Custom Screens tab. `src/png-to-lcd.py` and `g15r_drawXBM()` still exist and still work if this ever comes back, but they are NOT wired into anything current — don't assume they're part of the live feature set.
 
-### v1.0 section
+#### v1.0 section
 
 Everything below in this section is DONE and confirmed working by the user:
 
@@ -39,11 +74,11 @@ Everything below in this section is DONE and confirmed working by the user:
 
 *(rest of this file: explains the WHY behind the non-obvious parts, for whoever/whatever needs to actually debug something)*
 
-## What This Is
+### What This Is
 
 Turns the Logitech G510s keyboard's built-in LCD into a live CPU/RAM/VRAM/TEMP display, wires up the 5 buttons under the screen (L1-L5), and adds RGB backlight control. Everything runs as your normal user (no root needed at runtime), starts automatically at login, and survives reboots/replugs/kernel updates.
 
-## Files
+### Files
 
 | File | Description |
 | --- | --- |
@@ -71,25 +106,25 @@ Desktop icons (in `~/Desktop`, named "G510 LCD - ..."):
 | View Logs | live log viewer |
 | Project Folder | opens this folder in the file manager |
 
-## How To Make A Code Change
+### How To Make A Code Change
 
 1. Edit `g510_lcd_stats.c` or `g510_lcd_buttons.c`
 2. Double-click "G510 LCD - Rebuild" on the Desktop (or run `./rebuild.sh`) — this recompiles both and restarts the services for you.
 3. If you touched pixel-drawing code, check the screen for garbage — see "The Pixel Format" below before assuming it's a typo.
 
-## The Pixel Format (the single most important thing to know)
+### The Pixel Format (the single most important thing to know)
 
 The LCD is 160x43, 1 bit per pixel. libg15render's canvas buffer stores pixels ROW-MAJOR, MSB-first (`pixel_offset = y*160+x`). The physical LCD hardware wants pixels in a different, VERTICAL "page" format (8 pixels per byte, one byte per column, LSB = top pixel) — this is the classic SSD1306-style layout. `dump_to_lcd_format()` in `g510_lcd_stats.c` is a byte-for-byte port of libg15's own `dumpPixmapIntoLCDFormat()` that does this conversion. If you ever see garbled diagonal/streaky output instead of clean text, you skipped this conversion somewhere — do NOT just `memcpy` canvas->buffer to the device, it will look like static.
 
 The final wire format is a 992-byte HID report: byte 0 = `0x03` (the report ID, discovered by reading libg15's source — it's not documented anywhere else), bytes 1-31 = padding/zero, bytes 32-991 = the converted 960 bytes of page-format pixel data.
 
-## Why This Doesn't Use g15daemon / libg15's Own Device Code
+### Why This Doesn't Use g15daemon / libg15's Own Device Code
 
 g15daemon (the "standard" tool for this) grabs the keyboard's whole extra-keys USB interface via libusb, detaching it from the kernel's `hid_lg_g15` driver, then re-emits key events through its OWN decoder — which has the WRONG key table for a G510s specifically (a long-standing, never-fixed bug in that 15+ year old project). This broke media/volume keys HARD when tested live (confirmed: random garbage keystrokes).
 
 Instead, this program writes directly to `/dev/g510-lcd`, a hidraw device node — hidraw lets you send/receive HID reports through a device the kernel driver already owns, without detaching anything. The kernel's normal key handling (`hid_lg_g15`) keeps working completely undisturbed. This was verified repeatedly with the LCD screen running continuously while actively using media keys — zero interference either way.
 
-## Media Keys Fix (predates this project, but this is why it's safe to touch this keyboard at all — read before changing anything input-related)
+### Media Keys Fix (predates this project, but this is why it's safe to touch this keyboard at all — read before changing anything input-related)
 
 Three separate, unrelated problems were found and fixed on this exact keyboard. None of them involve this LCD project's code, but breaking any of them again is an easy mistake to make while experimenting:
 
@@ -97,7 +132,7 @@ Three separate, unrelated problems were found and fixed on this exact keyboard. 
 2. Brave's native media-key support and the "Plasma Integration" browser extension (id `cimiefiiaegbelhefglklhhakcgmhkai`) were BOTH registering as MPRIS players for the same tab, so KDE's media-key router got confused about which one to actually control. Fixed by disabling that extension's media-control feature (its `active_bit` should read `false` in Brave's Preferences JSON if you ever need to check).
 3. The kernel driver, `hid_lg_g15`, is what actually reports all of this keyboard's keys correctly — do NOT blacklist it (an earlier attempt to "fix" flaky media keys by forcing hid-generic instead turned out to be unnecessary once #1 and #2 above were found; `hid_lg_g15` is also required for the Gaming Keys interface this LCD project's buttons depend on). Check `lsmod | grep hid_lg_g15` and `grep -rl lg_g15 /etc/modprobe.d/` (should be empty) if media keys or L1-L5 ever stop responding after a system change.
 
-## Multi-Screen System
+### Multi-Screen System
 
 A single file, `$XDG_RUNTIME_DIR/g510lcd_screen`, holds one number:
 
@@ -107,7 +142,7 @@ A single file, `$XDG_RUNTIME_DIR/g510lcd_screen`, holds one number:
 
 `g510_lcd_stats.c` re-reads this file every loop iteration (~1-2s) and draws whichever screen it says. `g510_lcd_buttons.c` is the only thing that ever WRITES to this file. To add a new screen: write a new `draw_XXX_screen()` function, add a branch for its number in `main()`'s loop, and make some button set that number in `g510_lcd_buttons.c`.
 
-## Buttons (L1-L5)
+### Buttons (L1-L5)
 
 Real, standard Linux keycodes — no HID remapping was needed, unlike the media keys (see MEDIA KEYS FIX above for that story). Confirmed by testing each button individually:
 
@@ -117,7 +152,7 @@ Real, standard Linux keycodes — no HID remapping was needed, unlike the media 
 
 These switches BOUNCE (one physical press can fire 2-4 raw events) — `g510_lcd_buttons.c` has a 400ms debounce per key, don't remove it. L2-L5 currently do nothing but confirm the press — to actually program them, edit the `else` branch in `g510_lcd_buttons.c`'s main loop (the one that currently just calls `write_screen()`+`log_button()`).
 
-## Fonts
+### Fonts
 
 The library ships `default-00` through `default-39.fnt`, but they're all the SAME typeface at different sizes — not actually different fonts. For anything else, use `g15fontconvert -i font.ttf -o out.fnt -s N -g 1` (the AUR `libg15render` package; `-s` is NOT literal pixel height, it's closer to a point size — check the ACTUAL resulting height with:
 
@@ -131,7 +166,7 @@ IMPORTANT: thin/regular-weight fonts render GARBLED at this tiny size (confirmed
 
 `.otb`/`.pcf` bitmap fonts (like Terminus) do NOT work with `g15fontconvert` — it silently produces an empty/broken `.fnt` (`font_height` stuck at one value regardless of `-s`, near-zero file size). Only scalable TTF/OTF outline fonts convert correctly.
 
-## Backlight (RGB Keyboard Glow)
+### Backlight (RGB Keyboard Glow)
 
 This is a REAL Linux kernel LED device, nothing hidraw/USB-custom about it: `/sys/class/leds/g15::kbd_backlight/` — `brightness` (0-255) and `multi_intensity` ("R G B" space-separated, 0-255 each). KDE's own "Keyboard Colour: Follow accent colour" toggle fights over this same file — turn that OFF in System Settings > Brightness & Color if you want manual control to actually stick.
 
@@ -139,7 +174,7 @@ Applied automatically on boot/replug by `set-backlight-color.sh` via the udev ru
 
 Uses a preset-color dropdown (`COLOR_RGB` dict) rather than a live color picker — a Qt color picker would work fine here (this isn't the yad CLR+SCL crash from the old script, see the `legacy-yad-backlight-script` branch for that story), just wasn't built yet. Add more presets by editing the `COLOR_RGB` dict near the top of `g510_app.py`.
 
-## Persistence (why this survives reboots/updates)
+### Persistence (why this survives reboots/updates)
 
 `99-g510-lcd.rules` (installed at `/etc/udev/rules.d/`) does three things:
 
@@ -149,10 +184,10 @@ Uses a preset-color dropdown (`COLOR_RGB` dict) rather than a live color picker 
 
 The two systemd --user services are `enable`d, so they autostart at every login. `hid_lg_g15` (the kernel driver all of this depends on) is a mainline upstream driver, ships in every Manjaro kernel package — nothing here is tied to today's specific kernel version.
 
-## Gotcha We Actually Hit (keep this in mind if things break weirdly)
+### Gotcha We Actually Hit (keep this in mind if things break weirdly)
 
 A test script once ran `fopen("/dev/hidrawN", "wb")` at the exact moment the real device briefly didn't exist during re-enumeration — this silently created a REGULAR FILE named `hidrawN` in `/dev` instead of erroring, which then permanently blocked the kernel from recreating the real character device at that path. Symptom: permissions look right but writes still fail, or udev rules seem to apply then "un-apply". Fix: `stat /dev/hidrawN` — if it says "regular file" instead of "character special file", `sudo rm` it and replug the keyboard.
 
-## Udev Rule Gotcha (if you ever add another rule)
+### Udev Rule Gotcha (if you ever add another rule)
 
 Don't mix `ATTRS{}` from two different ancestor devices in one rule line (e.g. `ATTRS{idVendor}` lives on the USB device, `ATTRS{bInterfaceNumber}` lives on the USB interface, a different level) — once udev matches one `ATTRS{}` against a device, it locks onto that SAME device for the rest of the rule's `ATTRS{}` checks, silently failing to match. Use `ENV{}` for properties instead where possible (`ENV{ID_VENDOR_ID}`, `ENV{ID_MODEL_ID}`, `ENV{ID_USB_INTERFACE_NUM}` are all already resolved onto the device you actually want to match, no ancestor-walking involved) — this is what the hidraw rule does and it's reliable.
