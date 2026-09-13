@@ -1,15 +1,22 @@
 # bigblackclocks
 
-Custom Linux control software for two Logitech gaming keyboards that
-Logitech itself no longer properly supports on Linux, and that no other
-project gets fully right either: the **G510s** (LCD stats screen,
-buttons, backlight, macro keys) and the **G910 Orion Spectrum**
-(per-key RGB, macro keys, lighting profiles). Both were built from
-scratch by reading each keyboard's real protocol directly — no G HUB,
-no Logitech Gaming Software (Windows-only), and no reliance on
-community tools whose bugs turned out to be worse than not having the
-feature at all (see "Why This Doesn't Use g15daemon" below for the
-G510s case).
+Two Logitech gaming keyboards, the **G510s** and the **G910 Orion
+Spectrum** — same family, same era, same problem: nothing on Linux
+actually drives their hardware properly. Logitech's own software
+(G HUB / Logitech Gaming Software) is Windows-only, and the community
+tools that exist for keyboards like these are old, unmaintained, and
+get real things wrong (see "Why This Doesn't Use g15daemon" below for
+one concrete example: wrong key table, broken media keys). So instead
+of working around that, this repo talks to each keyboard's real
+hardware protocol directly and builds the control software ourselves —
+one app per keyboard, both born the same way: read the actual USB/HID
+traffic, verify every assumption against the real device, never guess.
+
+The G510s app drives its LCD, buttons, backlight, and macro keys. The
+G910 app drives its per-key RGB lighting and macro keys. Different
+feature sets because the keyboards are different, but the same
+approach and the same standard: nothing shipped here was assumed to
+work — it was tested on the real hardware first.
 
 Everything here runs as a normal user (no root needed at runtime),
 starts automatically at login, and survives reboots/replugs/kernel
