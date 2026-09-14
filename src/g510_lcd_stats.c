@@ -575,8 +575,8 @@ static void load_custom_screens(void) {
             while (tok) {
                 char key[32], val[64];
                 if (sscanf(tok, "%31[^=]=%63s", key, val) == 2) {
-                    if (strcmp(key, "sensor") == 0) strncpy(el->sensor, val, sizeof(el->sensor) - 1);
-                    else if (strcmp(key, "style") == 0) strncpy(el->style, val, sizeof(el->style) - 1);
+                    if (strcmp(key, "sensor") == 0) { strncpy(el->sensor, val, sizeof(el->sensor) - 1); el->sensor[sizeof(el->sensor) - 1] = 0; }
+                    else if (strcmp(key, "style") == 0) { strncpy(el->style, val, sizeof(el->style) - 1); el->style[sizeof(el->style) - 1] = 0; }
                     else if (strcmp(key, "x") == 0) el->x = atoi(val);
                     else if (strcmp(key, "y") == 0) el->y = atoi(val);
                     else if (strcmp(key, "width") == 0) el->width = atoi(val);
@@ -596,7 +596,7 @@ static void load_custom_screens(void) {
             while (tok) {
                 char key[32], val[192];
                 if (sscanf(tok, "%31[^=]=%191s", key, val) == 2) {
-                    if (strcmp(key, "path") == 0) strncpy(im->path, val, sizeof(im->path) - 1);
+                    if (strcmp(key, "path") == 0) { strncpy(im->path, val, sizeof(im->path) - 1); im->path[sizeof(im->path) - 1] = 0; }
                     else if (strcmp(key, "x") == 0) im->x = atoi(val);
                     else if (strcmp(key, "y") == 0) im->y = atoi(val);
                     else if (strcmp(key, "width") == 0) im->width = atoi(val);
@@ -604,7 +604,11 @@ static void load_custom_screens(void) {
                 }
                 tok = strtok(NULL, " ");
             }
-            if (im->path[0] && im->width > 0 && im->height > 0) cs->image_count++;
+            /* clamp to screen bounds -- guards against a hand-edited config
+               (this format is deliberately hand-editable) requesting a
+               malloc/fread far larger than the 160x43 screen could ever need */
+            if (im->path[0] && im->width > 0 && im->width <= G15_LCD_WIDTH &&
+                im->height > 0 && im->height <= G15_LCD_HEIGHT) cs->image_count++;
         }
     }
     fclose(f);

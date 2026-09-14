@@ -621,6 +621,7 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
+LCD_HEIGHT = 43  # matches G15_LCD_HEIGHT in g510_lcd_stats.c -- the screen's real pixel height
 CUSTOM_SCREEN_IMAGES_DIR = PROJECT_DIR / "custom_screen_images"
 
 
@@ -1205,7 +1206,7 @@ class CustomScreensTab(QWidget):
         png_to_lcd = PROJECT_DIR / "src" / "png-to-lcd.py"
         try:
             result = subprocess.run(
-                [sys.executable, str(png_to_lcd), src_path, str(out_path), str(max_width)],
+                [sys.executable, str(png_to_lcd), src_path, str(out_path), str(max_width), str(LCD_HEIGHT)],
                 capture_output=True, text=True, timeout=15,
             )
         except Exception as e:
