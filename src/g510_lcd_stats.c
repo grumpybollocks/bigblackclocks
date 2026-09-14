@@ -375,7 +375,9 @@ static const sensor_def_t SENSORS[] = {
     {"CPU_GHZ",          "GHZ",  0, 0},
     {"CPU_TEMP",         "TEMP", 0, 1},
     {"RAM_PCT",          "RAM",  1, 0},
+    {"RAM_AMOUNT",       "AMT",  0, 0},
     {"VRAM_PCT",         "VRAM", 1, 0},
+    {"VRAM_AMOUNT",      "AMT",  0, 0},
     {"MAXTEMP",          "MAXT", 0, 1},
     {"GPU_PCT",          "GPU",  1, 0},
     {"GPU_EDGE_TEMP",    "EDGE", 0, 1},
@@ -422,11 +424,17 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
         double v = t > 0 ? 100.0 * u / t : 0;
         *pct_for_bar = v;
         snprintf(disp, displen, "%d%%", (int)(v + 0.5));
+    } else if (strcmp(key, "RAM_AMOUNT") == 0) {
+        long u, t; get_ram_kb(&u, &t);
+        snprintf(disp, displen, "%.1fG", u / (1024.0 * 1024.0));
     } else if (strcmp(key, "VRAM_PCT") == 0) {
         unsigned long long u, t; get_vram_bytes(&u, &t);
         double v = t > 0 ? 100.0 * u / t : 0;
         *pct_for_bar = v;
         snprintf(disp, displen, "%d%%", (int)(v + 0.5));
+    } else if (strcmp(key, "VRAM_AMOUNT") == 0) {
+        unsigned long long u, t; get_vram_bytes(&u, &t);
+        format_gb(u, disp, displen);
     } else if (strcmp(key, "MAXTEMP") == 0) {
         snprintf(disp, displen, "%d\xB0" "C", max_temp_seen);
     } else if (strcmp(key, "GPU_PCT") == 0) {
