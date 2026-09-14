@@ -389,6 +389,8 @@ static const sensor_def_t SENSORS[] = {
     {"UPTIME",           "UPTM", 0, 0},
     {"NET_DOWN",         "DOWN", 0, 0},
     {"NET_UP",           "UPLD", 0, 0},
+    {"TIME",             "TIME", 0, 0},
+    {"DATE",             "DATE", 0, 0},
     {"MB_TEMP1",         "MB1",  0, 1},
     {"MB_TEMP2",         "MB2",  0, 1},
     {"MB_TEMP3",         "MB3",  0, 1},
@@ -471,6 +473,12 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
         format_kbps(g_net_down_kbps, disp, displen);
     } else if (strcmp(key, "NET_UP") == 0) {
         format_kbps(g_net_up_kbps, disp, displen);
+    } else if (strcmp(key, "TIME") == 0) {
+        time_t now = time(NULL);
+        strftime(disp, displen, "%H:%M:%S", localtime(&now));
+    } else if (strcmp(key, "DATE") == 0) {
+        time_t now = time(NULL);
+        strftime(disp, displen, "%d %b", localtime(&now));
     } else if (strncmp(key, "MB_TEMP", 7) == 0) {
         int n = atoi(key + 7);
         char path[128];

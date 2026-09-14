@@ -585,6 +585,8 @@ SENSOR_CHOICES = [
     ("UPTIME", "Uptime"),
     ("NET_DOWN", "Network Download Speed"),
     ("NET_UP", "Network Upload Speed"),
+    ("TIME", "Time"),
+    ("DATE", "Date"),
     ("MB_TEMP1", "Motherboard Temp 1 (unlabeled)"),
     ("MB_TEMP2", "Motherboard Temp 2 (unlabeled)"),
     ("MB_TEMP3", "Motherboard Temp 3 (unlabeled)"),
