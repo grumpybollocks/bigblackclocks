@@ -621,7 +621,6 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
-LCD_HEIGHT = 43  # matches G15_LCD_HEIGHT in g510_lcd_stats.c -- the screen's real pixel height
 CUSTOM_SCREEN_IMAGES_DIR = PROJECT_DIR / "custom_screen_images"
 
 
@@ -1024,7 +1023,11 @@ class CustomScreensTab(QWidget):
         self.preview_canvas.drag_finished.connect(self.on_drag_finished)
         canvas_col.addWidget(self.preview_canvas)
 
-        drag_hint = QLabel("Drag an element to move it. Drag a bar's handle (right edge) to resize it.")
+        drag_hint = QLabel(
+            "Drag an element or image to move it. Hover a bar to reveal its "
+            "resize handle (right edge). Images resize by re-importing."
+        )
+        drag_hint.setWordWrap(True)
         drag_hint.setObjectName("Status")
         canvas_col.addWidget(drag_hint)
         canvas_col.addStretch()
@@ -1123,10 +1126,15 @@ class CustomScreensTab(QWidget):
         for k, btn in self.screen_buttons.items():
             btn.setChecked(k == key)
         editable = key != "L1"
+        l1_reason = "L1 is the built-in clock -- it can't be edited." if not editable else ""
         self.sensor_combo.setEnabled(editable)
+        self.sensor_combo.setToolTip(l1_reason)
         self.style_combo.setEnabled(editable)
+        self.style_combo.setToolTip(l1_reason)
         self.add_btn.setEnabled(editable)
+        self.add_btn.setToolTip(l1_reason)
         self.import_image_btn.setEnabled(editable)
+        self.import_image_btn.setToolTip(l1_reason)
         self.refresh_elements_list()
         self.refresh_preview()
 
@@ -1221,10 +1229,16 @@ class CustomScreensTab(QWidget):
             QMessageBox.critical(self, "Import failed", f"Unexpected converter output: {result.stdout!r}")
             return
 
+        # Stagger the default drop spot by how many images are already on
+        # this screen (mirrors on_add_element's default_y wrap for sensors)
+        # -- otherwise a second import lands exactly on top of the first,
+        # invisible until you notice and drag the top one out of the way.
+        default_x = min(6 + 20 * image_count, max(0, LCD_WIDTH - w))
+        default_y = min(6 + 15 * image_count, max(0, LCD_HEIGHT - h))
         elements.append({
             "kind": "image",
             "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against PROJECT_DIR
-            "x": 6, "y": 6,
+            "x": default_x, "y": default_y,
             "width": w, "height": h,
         })
         save_custom_screens(self.config)
