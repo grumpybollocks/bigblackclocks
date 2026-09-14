@@ -424,6 +424,7 @@ class KeyboardTab(QWidget):
             self.canvas.set_board_color(QColor(*current_rgb))
         self.canvas.gkey_clicked.connect(self.open_key_dialog)
         self.canvas.mkey_clicked.connect(self.select_profile)
+        self.refresh_assigned_keys()
         root.addWidget(self.canvas, stretch=1)
 
         panel = QWidget()
@@ -499,6 +500,14 @@ class KeyboardTab(QWidget):
     def select_profile(self, name):
         self.current_profile = name
         self.canvas.set_active_mkey(name)
+        self.refresh_assigned_keys()
+
+    def refresh_assigned_keys(self):
+        """Which G-keys have a macro in the CURRENT profile -- drawn
+        with a gold border on the canvas so it's visible at a glance,
+        without opening each key's dialog to check."""
+        assigned = load_macros().get(self.current_profile, {}).keys()
+        self.canvas.set_assigned_keys(assigned)
 
     def poll_hardware_state(self):
         try:
@@ -512,6 +521,7 @@ class KeyboardTab(QWidget):
     def open_key_dialog(self, gkey):
         dlg = MacroRecordDialog(self.current_profile, gkey, self)
         dlg.exec_()
+        self.refresh_assigned_keys()  # a macro may have been saved or cleared
 
     def on_apply(self):
         ok, err = apply_backlight(self.color_combo.currentText(), self.bright_slider.value())

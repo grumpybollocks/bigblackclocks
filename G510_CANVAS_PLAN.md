@@ -148,3 +148,113 @@ literal physical click hasn't been done by a human yet. Recording a
 real macro through the new canvas end-to-end, and seeing the whole
 thing with your own eyes, are both still pending — same "not done
 until you say so" rule as always.
+
+## Extra: macro-assigned indicator (added after the initial merge)
+
+While doing the full self-audit below, added one small enhancement
+beyond parity with the G910 app (which has no macro-assignment concept
+to show at all): G-keys that have a macro saved in the CURRENTLY
+ACTIVE profile now draw with a gold border instead of the plain accent
+border, so you can see at a glance what's already programmed without
+opening every key's dialog. Refreshed on profile switch
+(`select_profile`) and after any macro dialog closes
+(`open_key_dialog`, since Save/Clear may have changed the current
+profile's assignments) — both paths call `refresh_assigned_keys()`,
+which just reads `load_macros()` for the active profile's key set and
+hands it to `canvas.set_assigned_keys()`. No new state, no new files,
+reuses `load_macros()` exactly as it already existed.
+
+## Comprehensive self-audit (2026-09-14, done solo while the user slept)
+
+Requested explicitly: "a full comprehensive bug check, test the app
+under the hood yourself without human interaction." Six separate
+headless test scripts, run against the REAL code and, where
+applicable, the REAL hardware (not a mock of the hardware) — every
+script restores whatever it touched to its original state before
+finishing:
+
+1. **Geometry validation** — all 127 canvas cells checked pairwise for
+   pixel-rect overlap (zero found), confirmed all 18 G-key names
+   present and unique, confirmed the 4 M-key/MR names correct.
+2. **Click simulation** — every single one of the 18 G-keys clicked at
+   its exact rect center (via `_cell_at` + signal emission) and
+   confirmed it fires the right key name; all 4 M-key/MR cells clicked
+   via a REAL `QMouseEvent` through the actual `mousePressEvent`
+   handler (not a shortcut) — M1/M2/M3 confirmed to fire, MR confirmed
+   to correctly fire NOTHING (by design, see above); an empty
+   background click confirmed to fire nothing.
+3. **Full integration** — all 3 profiles × 3 sample G-keys (9
+   combinations) clicked through the actual `KeyboardTab` signal
+   wiring, confirming `MacroRecordDialog` is constructed with the
+   correct (profile, gkey) pair every time (a spied `__init__`, not
+   just a mock, so the real arguments were checked) — this is the
+   class of bug a stale-closure-over-a-loop-variable mistake would
+   have caused, and it didn't. Then ALL 9 `COLOR_RGB` presets applied
+   through the real `on_apply()` path, each one verified against the
+   ACTUAL physical LED's `multi_intensity` sysfs value (not assumed),
+   and against the canvas's board color. `Set as Default` verified to
+   leave the live LED completely untouched (a real bug class from
+   earlier in this project's history — checked again here since the
+   canvas merge touches the same code path).
+4. **Service control + MR LED** — `restart`/`stop`/`start` all run for
+   real through `systemctl --user`, actual service state checked after
+   each (not just "no exception raised"). The `g15::macro_record` LED
+   sysfs file was actually written to (1, then 0) and the poll
+   function's result checked against each real value.
+5. **Window resize + Custom Screens regression** — checked the window
+   does NOT shrink when switching to the narrower Custom Screens tab
+   (stays sized for the wider canvas tab; a deliberate non-issue, not
+   a bug — a stable window shape while switching tabs is arguably
+   better UX than one that jumps size). Re-ran `render_preview()` for
+   all 6 LCD screens (0-5) to confirm the v1.1 Custom Screens tab
+   still works unmodified. Re-ran a `save_macro`/`load_macros`
+   round-trip against the REAL `macros.json` (with the original
+   content saved first and restored after).
+6. **Assigned-keys feature** (see above) — checked against the actual
+   current `macros.json` content (not synthetic data): correct initial
+   state for M1, correct update on switching to M2 and M3, and the
+   real-world case of saving a new macro then closing a dialog for a
+   DIFFERENT key still picks up the change (catches a "only refreshes
+   the key you just edited" class of bug).
+
+**Result: zero real bugs found.** Every test passed on the first
+complete run, then all six were re-run together after adding the
+assigned-keys feature, to confirm that addition didn't regress
+anything already verified — passed again, identically.
+
+**Real hardware left in its original state after all of this**:
+confirmed at the end — LED back to Green/(0 255 0)/full brightness,
+`macro_record` LED back to 0, `macros.json` byte-for-byte identical to
+before testing started, all 3 services active.
+
+## Rollback
+
+Two tags exist for this, at different granularity:
+
+- **`pre-canvas-checkpoint`** (commit `dae91d8`) — the exact state
+  right before this canvas merge, but AFTER v1.1's Custom Screens tab.
+  Use this if the canvas UI itself needs to be undone but v1.1 should
+  stay.
+- **`v1.0`** (commit `4521162`) — the last state confirmed working by
+  the user in person, before v1.1 OR the canvas merge. Use this only
+  if you want to throw away both.
+
+To undo just the canvas merge while keeping history intact (preferred
+— a revert commit, not a rewrite):
+
+```bash
+git revert d6a1d64
+```
+
+To hard-reset `main` back to before the canvas merge (rewrites
+history — only do this if the commit hasn't been built on elsewhere,
+and never without checking `git log` first for anything to lose):
+
+```bash
+git reset --hard pre-canvas-checkpoint
+```
+
+Either way, after rolling back the code: relaunch the GUI app
+(`pkill -f src/g510_app.py`, then `python3 src/g510_app.py` from the
+project root) — the currently-running process won't pick up a
+rollback on its own.

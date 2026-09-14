@@ -167,6 +167,7 @@ LCD_COLOR = QColor(70, 90, 60)               # muted screen-like tone -- visuall
 MKEY_UNSET_COLOR = QColor(50, 50, 55)
 ACTIVE_MKEY_COLOR = QColor(58, 108, 196)     # matches G910's active-profile accent
 MR_ACTIVE_COLOR = QColor(196, 70, 58)
+ASSIGNED_BORDER_COLOR = QColor(230, 175, 60)  # warm gold -- "this G-key has a macro"
 
 
 class G510Canvas(QWidget):
@@ -184,6 +185,7 @@ class G510Canvas(QWidget):
         self._board_color = BOARD_UNSET_COLOR
         self._active_mkey = "M1"
         self._mr_active = False
+        self._assigned = set()  # G-key names with a macro in the current profile
         self._compute_size()
 
     def set_board_color(self, qcolor):
@@ -196,6 +198,13 @@ class G510Canvas(QWidget):
 
     def set_mr_active(self, on):
         self._mr_active = on
+        self.update()
+
+    def set_assigned_keys(self, key_names):
+        """Which G-keys have a macro assigned in the CURRENT profile --
+        drawn with a distinct border so you can see at a glance what's
+        already programmed without opening every key's dialog."""
+        self._assigned = set(key_names)
         self.update()
 
     def _compute_size(self):
@@ -257,8 +266,13 @@ class G510Canvas(QWidget):
                 fill = self._board_color
 
             painter.fillPath(path, fill)
-            border = GKEY_BORDER_COLOR if cell.kind == "gkey" else KEY_BORDER_COLOR
-            painter.setPen(QPen(border, 1))
+            if cell.kind == "gkey" and cell.key_name in self._assigned:
+                border, pen_width = ASSIGNED_BORDER_COLOR, 2
+            elif cell.kind == "gkey":
+                border, pen_width = GKEY_BORDER_COLOR, 1
+            else:
+                border, pen_width = KEY_BORDER_COLOR, 1
+            painter.setPen(QPen(border, pen_width))
             painter.drawPath(path)
 
             painter.setPen(self._label_color(fill))
