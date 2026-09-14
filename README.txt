@@ -9,7 +9,7 @@ Fresh-install setup: run ./install.sh (installs every dependency,
 places system files, compiles, enables services -- see that file for
 the one thing it CAN'T automate: sourcing your own Eurostile Bold font).
 
-STATUS FOR AI AGENTS -- read this block only, skip the rest unless you
+PROJECT STATUS -- read this block only, skip the rest unless you
 need deep detail for actual debugging:
 
 v1.0 TAGGED (git tag v1.0, pushed). Everything in the v1.0 section
