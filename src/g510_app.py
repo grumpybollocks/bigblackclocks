@@ -773,6 +773,7 @@ class ScreenPreviewCanvas(QWidget):
         self._resize_index = None
         self._resize_start_x = 0
         self._resize_start_width = 0
+        self._hover_index = None  # bar element the mouse is currently near -- only ITS handle is drawn
         self.setFixedSize(LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE)
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
@@ -839,11 +840,17 @@ class ScreenPreviewCanvas(QWidget):
         painter = QPainter(self)
         if self._pixmap is not None:
             painter.drawPixmap(0, 0, self._pixmap)
-        for i, el in enumerate(self._elements):
-            if el.get("style") == "bar":
-                painter.setPen(QPen(QColor(120, 120, 120), 1))
-                painter.setBrush(QColor(70, 140, 230, 180))
-                painter.drawRect(self._resize_handle_rect(i))
+        # Only the bar you're actively resizing, or the one you're
+        # currently hovering near, gets its handle drawn -- showing
+        # every bar's handle at once (the original approach) cluttered
+        # a screen this small badly enough to be reported directly as
+        # confusing ("wtf are the blue squares for?").
+        handle_owner = self._resize_index if self._resize_index is not None else self._hover_index
+        if handle_owner is not None and 0 <= handle_owner < len(self._elements) \
+                and self._elements[handle_owner].get("style") == "bar":
+            painter.setPen(QPen(QColor(120, 120, 120), 1))
+            painter.setBrush(QColor(70, 140, 230, 180))
+            painter.drawRect(self._resize_handle_rect(handle_owner))
         active = self._drag_index if self._drag_index is not None else self._resize_index
         if active is not None:
             painter.setPen(QPen(QColor(70, 140, 230), 2, Qt.DashLine))
@@ -886,6 +893,10 @@ class ScreenPreviewCanvas(QWidget):
         if self._drag_index is None:
             idx = self._element_at(event.pos())
             over_handle = self._resize_handle_at(event.pos()) is not None
+            new_hover = idx if (idx is not None and self._elements[idx].get("style") == "bar") else None
+            if new_hover != self._hover_index:
+                self._hover_index = new_hover
+                self.update()
             if over_handle:
                 self.setCursor(Qt.SizeHorCursor)
             elif idx is not None:
@@ -918,6 +929,11 @@ class ScreenPreviewCanvas(QWidget):
         self.setCursor(Qt.ArrowCursor)
         self.update()
         self.drag_finished.emit()
+
+    def leaveEvent(self, event):
+        if self._hover_index is not None:
+            self._hover_index = None
+            self.update()
 
 
 class CustomScreensTab(QWidget):
