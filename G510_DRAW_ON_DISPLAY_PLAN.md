@@ -63,6 +63,44 @@ real app. Integrating them into `g510_lcd_stats.c` and the GUI is a
 real implementation step, not yet done, but it's building on solid,
 checked ground rather than a documentation claim nobody had re-tested.
 
+**Second round of research, also 2026-09-14**: asked to check what
+other projects/approaches exist rather than just trust the first idea.
+Two real findings:
+
+1. `libg15render` has its own native image format support
+   (`g15r_loadWbmpToBuf`/`g15r_loadWbmpSplash`, WBMP -- a real,
+   standardized 1-bit bitmap format) that this plan's `png-to-lcd.py`
+   completely bypasses in favor of hex-scraping a Pillow-generated XBM
+   C-source file with a regex. That looked like a real "reinventing
+   something the library already solved" smell worth investigating.
+2. Confirmed Pillow's `img.convert("1")` uses Floyd-Steinberg dithering
+   by default (the standard, correct algorithm for this) -- that part
+   of the original plan was right, now actually confirmed rather than
+   assumed.
+
+Investigated switching to Pillow's direct `img.tobytes()` (skipping
+the XBM-text-regex step entirely, which looked like the "obviously
+cleaner" fix) -- and this is the important part: **tested it before
+adopting it, and it's actually WRONG**. `g15r_drawXBM()` expects XBM's
+traditional bit-packing order; Pillow's raw `tobytes()` for mode "1"
+packs bits the opposite way. Rendered both through the exact same test
+harness: the XBM-regex version renders correctly (confirmed above);
+`tobytes()` renders visibly broken -- each byte's 8 pixels mirrored,
+turning "TEST" into scrambled garbage. Screenshotted and compared
+directly, not inferred from byte differences alone.
+
+**Conclusion: no change to the plan's actual approach.** The existing
+`png-to-lcd.py` XBM-export-plus-regex method looked hacky but is
+correct for what this specific library function needs -- verified by
+trying the "cleaner" alternative and watching it fail. Switching to
+WBMP proper would need `g15r_loadWbmpToBuf`'s own header format
+constructed correctly too (not yet attempted -- `g15r_drawXBM` already
+works and takes width/height as explicit parameters, so there's no
+real benefit to a self-describing file format when width/height are
+already tracked in `custom_screens.txt`). Worth knowing this
+alternative exists in case a future need for standalone/portable image
+files arises, but not worth switching to now.
+
 So "the draw on display phase" = finishing this: letting you actually
 put an image on one of the L2-L5 screens, not just sensor bars and
 numbers.
