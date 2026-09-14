@@ -21,8 +21,8 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QGridLayout, QComboBox, QSlider, QPushButton, QLabel,
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QImage, QPixmap, QColor
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
+from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen
 import evdev
 from evdev import ecodes
 
@@ -695,12 +695,110 @@ def render_preview(screen_num):
     return QPixmap.fromImage(img), None
 
 
+PREVIEW_SCALE = 4
+# Approximate click/drag hit box per element, in real LCD pixels (not
+# scaled) -- there's no exact per-element width/height available from
+# Python (the C renderer computes real text width using font metrics
+# Python doesn't have access to), so this is a deliberately generous
+# fixed size rather than pixel-perfect. Good enough to click and drag
+# elements that are reasonably spaced, which is the normal case for an
+# 8-element-max, 160x43 screen.
+ELEMENT_HIT_W = 50
+ELEMENT_HIT_H = 10
+
+
+class ScreenPreviewCanvas(QWidget):
+    """The live LCD preview, but interactive: click and drag an element
+    to move it, with the preview re-rendering (throttled) as you drag
+    so you can see exactly where it'll land -- same underlying
+    --preview mechanism as before, just wired to mouse events instead
+    of typed X/Y numbers."""
+    element_moved = pyqtSignal(int, int, int)  # index, new_x, new_y (LCD-space)
+    drag_started = pyqtSignal()
+    drag_finished = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._pixmap = None
+        self._elements = []
+        self._drag_index = None
+        self._drag_offset = QPoint(0, 0)
+        self.setFixedSize(LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.ArrowCursor)
+
+    def set_data(self, pixmap, elements):
+        self._pixmap = pixmap
+        self._elements = elements
+        self.update()
+
+    def _element_rect(self, el):
+        return QRect(
+            el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
+            ELEMENT_HIT_W * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE,
+        )
+
+    def _element_at(self, pos):
+        # Last element in the list is drawn/added most recently -- check
+        # in reverse so an overlapping newer element wins, matching what
+        # you'd visually expect to grab.
+        for i in range(len(self._elements) - 1, -1, -1):
+            if self._element_rect(self._elements[i]).contains(pos):
+                return i
+        return None
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        if self._pixmap is not None:
+            painter.drawPixmap(0, 0, self._pixmap)
+        if self._drag_index is not None:
+            painter.setPen(QPen(QColor(70, 140, 230), 2, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self._element_rect(self._elements[self._drag_index]))
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.LeftButton:
+            return
+        idx = self._element_at(event.pos())
+        if idx is None:
+            return
+        self._drag_index = idx
+        el = self._elements[idx]
+        el_pos = QPoint(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE)
+        self._drag_offset = event.pos() - el_pos
+        self.update()
+        self.drag_started.emit()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_index is None:
+            idx = self._element_at(event.pos())
+            self.setCursor(Qt.OpenHandCursor if idx is not None else Qt.ArrowCursor)
+            return
+        self.setCursor(Qt.ClosedHandCursor)
+        new_pos = event.pos() - self._drag_offset
+        x = max(0, min(LCD_WIDTH - 1, round(new_pos.x() / PREVIEW_SCALE)))
+        y = max(0, min(LCD_HEIGHT - 1, round(new_pos.y() / PREVIEW_SCALE)))
+        el = self._elements[self._drag_index]
+        if el["x"] != x or el["y"] != y:
+            el["x"], el["y"] = x, y
+            self.element_moved.emit(self._drag_index, x, y)
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.LeftButton or self._drag_index is None:
+            return
+        self._drag_index = None
+        self.setCursor(Qt.ArrowCursor)
+        self.update()
+        self.drag_finished.emit()
+
+
 class CustomScreensTab(QWidget):
     """AIDA64-style dashboard builder for the L2-L5 buttons. Pick a
-    screen, add sensors with a display style and position, see the
-    result live -- the preview is the real LCD-drawing code running in
-    a one-shot mode, so what you see here is exactly what the keyboard
-    will show."""
+    screen, add sensors with a display style, drag them into place on
+    the live preview -- the preview is the real LCD-drawing code
+    running in a one-shot mode, so what you see here is exactly what
+    the keyboard will show."""
     def __init__(self):
         super().__init__()
         self.current_screen = "L2"
@@ -727,17 +825,23 @@ class CustomScreensTab(QWidget):
         self.screen_buttons["L2"].setChecked(True)
         layout.addLayout(screen_row)
 
-        # Live preview -- scaled up 4x (160x43 -> 640x172) so it's
-        # actually readable, tinted to match the real green-on-black LCD.
-        self.preview_label = QLabel("Preview loading...")
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setFixedSize(LCD_WIDTH * 4, LCD_HEIGHT * 4)
-        self.preview_label.setStyleSheet("background-color: #bed691; border: 1px solid #555;")
+        # Live, interactive preview -- scaled up 4x (160x43 -> 640x172)
+        # so it's actually readable, tinted to match the real
+        # green-on-black LCD. Elements are click-and-drag movable
+        # directly on this, not typed as X/Y numbers.
+        self.preview_canvas = ScreenPreviewCanvas()
+        self.preview_canvas.element_moved.connect(self.on_element_dragged)
+        self.preview_canvas.drag_finished.connect(self.on_drag_finished)
         preview_row = QHBoxLayout()
         preview_row.addStretch()
-        preview_row.addWidget(self.preview_label)
+        preview_row.addWidget(self.preview_canvas)
         preview_row.addStretch()
         layout.addLayout(preview_row)
+
+        drag_hint = QLabel("Click and drag an element on the preview above to move it.")
+        drag_hint.setObjectName("Status")
+        drag_hint.setAlignment(Qt.AlignCenter)
+        layout.addWidget(drag_hint)
 
         layout.addWidget(self._hline())
 
@@ -753,18 +857,6 @@ class CustomScreensTab(QWidget):
         self.style_combo.addItem("Number", "number")
         self.style_combo.addItem("Bar", "bar")
         form_row.addWidget(self.style_combo)
-
-        form_row.addWidget(QLabel("X:"))
-        self.x_spin = QSpinBox()
-        self.x_spin.setRange(0, LCD_WIDTH - 1)
-        self.x_spin.setValue(6)
-        form_row.addWidget(self.x_spin)
-
-        form_row.addWidget(QLabel("Y:"))
-        self.y_spin = QSpinBox()
-        self.y_spin.setRange(0, LCD_HEIGHT - 1)
-        self.y_spin.setValue(3)
-        form_row.addWidget(self.y_spin)
 
         add_btn = QPushButton("Add")
         add_btn.clicked.connect(self.on_add_element)
@@ -796,6 +888,13 @@ class CustomScreensTab(QWidget):
         self.preview_timer.timeout.connect(self.refresh_preview)
         self.preview_timer.start(1000)
 
+        # Separate, faster timer -- only running while actively
+        # dragging -- so the preview visibly follows your mouse instead
+        # of waiting up to a second for the next idle tick.
+        self.drag_refresh_timer = QTimer(self)
+        self.drag_refresh_timer.timeout.connect(self.refresh_preview)
+        self.preview_canvas.drag_started.connect(self.on_drag_started)
+
     def _hline(self):
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -822,11 +921,17 @@ class CustomScreensTab(QWidget):
         if len(elements) >= 8:
             QMessageBox.warning(self, "Screen full", "Each screen supports up to 8 elements.")
             return
+        # No X/Y fields anymore -- new elements land at a default spot
+        # (stacked below whatever's already there) and you drag them
+        # into their real place on the preview. y wraps back to the top
+        # once it'd run off the bottom of the 43px screen, rather than
+        # placing something permanently off-screen.
+        default_y = (6 + 12 * len(elements)) % LCD_HEIGHT
         elements.append({
             "sensor": self.sensor_combo.currentData(),
             "style": self.style_combo.currentData(),
-            "x": self.x_spin.value(),
-            "y": self.y_spin.value(),
+            "x": 6,
+            "y": default_y,
         })
         save_custom_screens(self.config)
         self.refresh_elements_list()
@@ -837,6 +942,23 @@ class CustomScreensTab(QWidget):
         save_custom_screens(self.config)
         self.refresh_elements_list()
         self.refresh_preview()
+
+    def on_element_dragged(self, index, x, y):
+        # Called continuously while dragging. The actual re-render is
+        # handled by drag_refresh_timer (started on drag_started, at a
+        # fixed ~120ms cadence) rather than here on every single pixel
+        # of mouse movement -- that would spawn a subprocess call per
+        # frame during a fast drag and stutter badly. This just keeps
+        # the (x, y) text in the element list live and cheap.
+        self.refresh_elements_list()
+
+    def on_drag_started(self):
+        self.drag_refresh_timer.start(120)
+
+    def on_drag_finished(self):
+        self.drag_refresh_timer.stop()
+        save_custom_screens(self.config)
+        self.refresh_preview()  # one final, accurate, untimed refresh
 
     def refresh_elements_list(self):
         while self.elements_layout.count():
@@ -863,12 +985,13 @@ class CustomScreensTab(QWidget):
     def refresh_preview(self):
         pixmap, err = render_preview(self.screen_number())
         if pixmap is None:
-            self.preview_label.setText(err or "Preview unavailable.")
+            print(f"Custom Screens preview error: {err}")  # surfaced in the panel below instead of blocking the canvas
             return
         scaled = pixmap.scaled(
-            LCD_WIDTH * 4, LCD_HEIGHT * 4, Qt.KeepAspectRatio, Qt.FastTransformation
+            LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE,
+            Qt.KeepAspectRatio, Qt.FastTransformation,
         )
-        self.preview_label.setPixmap(scaled)
+        self.preview_canvas.set_data(scaled, self.config[self.current_screen])
 
 
 class MainWindow(QMainWindow):
