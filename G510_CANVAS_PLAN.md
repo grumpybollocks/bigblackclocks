@@ -1,6 +1,6 @@
 # G510s Canvas Rearchitecture — Backlight + G-Keys merged into one view
 
-Built 2026-09-14 on AC130Tria (where the real G510s hardware lives),
+Built 2026-09-14 on the machine where the real G510s hardware lives,
 mirroring the sibling G910 project's canvas rearchitecture
 (`G910_CANVAS_PLAN.md`, branch `g910-canvas`) at the user's explicit
 request: "adapt this one to the variables at hand." Not a shared
