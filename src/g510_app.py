@@ -609,6 +609,14 @@ BAR_CAPABLE_SENSORS = {
 }
 
 CUSTOM_SCREEN_KEYS = ["L2", "L3", "L4", "L5"]
+# L1 is the built-in clock screen (drawn by draw_clock_screen() in C,
+# not draw_custom_screen()) -- it has no ELEMENT lines of its own and
+# was never meant to be edited here. Included in the tab's screen
+# selector as a read-only preview only, per user request ("make a
+# preview panel for L1 too") -- kept separate from CUSTOM_SCREEN_KEYS
+# so load/save_custom_screens (which only know about real SCREEN
+# blocks) are untouched.
+SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
 def load_custom_screens():
@@ -955,7 +963,7 @@ class CustomScreensTab(QWidget):
         screen_row = QHBoxLayout()
         screen_row.setSpacing(8)
         self.screen_buttons = {}
-        for key in CUSTOM_SCREEN_KEYS:
+        for key in SCREEN_PREVIEW_KEYS:
             btn = QPushButton(key)
             btn.setCheckable(True)
             btn.setStyleSheet(
@@ -1016,7 +1024,7 @@ class CustomScreensTab(QWidget):
         self.bar_hint_label.hide()
         panel_layout.addWidget(self.bar_hint_label)
 
-        add_btn = QPushButton("Add")
+        self.add_btn = add_btn = QPushButton("Add")
         add_btn.setObjectName("Primary")
         add_btn.clicked.connect(self.on_add_element)
         panel_layout.addWidget(add_btn)
@@ -1075,6 +1083,10 @@ class CustomScreensTab(QWidget):
         self.current_screen = key
         for k, btn in self.screen_buttons.items():
             btn.setChecked(k == key)
+        editable = key != "L1"
+        self.sensor_combo.setEnabled(editable)
+        self.style_combo.setEnabled(editable)
+        self.add_btn.setEnabled(editable)
         self.refresh_elements_list()
         self.refresh_preview()
 
@@ -1087,6 +1099,8 @@ class CustomScreensTab(QWidget):
         return int(self.current_screen[1])  # "L2" -> 2
 
     def on_add_element(self):
+        if self.current_screen == "L1":
+            return  # button is disabled for this case, this is just a safety guard
         elements = self.config[self.current_screen]
         if len(elements) >= 8:
             QMessageBox.warning(self, "Screen full", "Each screen supports up to 8 elements.")
@@ -1150,6 +1164,14 @@ class CustomScreensTab(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+        if self.current_screen == "L1":
+            info = QLabel("L1 is the built-in clock screen -- shown here for reference, not editable.")
+            info.setWordWrap(True)
+            info.setObjectName("Status")
+            self.elements_layout.addWidget(info)
+            self.elements_layout.addStretch()
+            return
+
         elements = self.config[self.current_screen]
         if not elements:
             self.elements_layout.addWidget(QLabel("Nothing on this screen yet."))
@@ -1187,7 +1209,8 @@ class CustomScreensTab(QWidget):
             LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE,
             Qt.KeepAspectRatio, Qt.FastTransformation,
         )
-        self.preview_canvas.set_data(scaled, self.config[self.current_screen], bounds)
+        elements = self.config.get(self.current_screen, [])  # L1 isn't a key in self.config -- no draggable elements there
+        self.preview_canvas.set_data(scaled, elements, bounds)
 
 
 class MainWindow(QMainWindow):

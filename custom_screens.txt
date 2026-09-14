@@ -1,8 +1,10 @@
 SCREEN L2
 ELEMENT sensor=CPU_PCT style=number x=6 y=1 width=40
-ELEMENT sensor=CPU_PCT style=bar x=6 y=12 width=43
-ELEMENT sensor=VRAM_PCT style=bar x=6 y=23 width=58
+ELEMENT sensor=CPU_PCT style=bar x=6 y=12 width=24
+ELEMENT sensor=VRAM_PCT style=bar x=42 y=20 width=69
 ELEMENT sensor=GPU_VRAM_TEMP style=bar x=6 y=34 width=51
+ELEMENT sensor=CPU_GHZ style=number x=80 y=6 width=40
+ELEMENT sensor=CPU_GHZ style=number x=6 y=23 width=40
 SCREEN L3
 SCREEN L4
 SCREEN L5
