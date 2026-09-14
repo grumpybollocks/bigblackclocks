@@ -32,9 +32,36 @@ an entry for `custom_screen_images/*.bin` — a directory that doesn't
 exist yet, reserved for exactly this before it was ever built. And
 `src/png-to-lcd.py` (PNG → 1-bit XBM bitmap, already written, already
 using Pillow's dithering so it doesn't need any manual tuning) plus
-`g15r_drawXBM()` (the actual render call, part of `libg15render`,
-already used successfully in an earlier test — a rectangle rendered
-correctly on the real screen) are both sitting there, unused, ready.
+`g15r_drawXBM()` (the render call, part of `libg15render`) are both
+sitting there, unused.
+
+**Correction, verified 2026-09-14**: the original version of this plan
+repeated an old README claim that `g15r_drawXBM()` was "already
+verified working (a rectangle test rendered correctly on the real
+screen)" — checked that claim properly instead of trusting it:
+`g15r_drawXBM` isn't called anywhere in the current `.c` files, and
+`git log --all` has zero commits mentioning XBM, rectangles, or a PNG
+test. That evidence doesn't exist in this repo — the claim may refer
+to an uncommitted throwaway test from early in the project, or may
+just be stale documentation that was never re-checked. Rather than
+keep repeating it, tested both pieces myself, fresh, just now:
+
+- `png-to-lcd.py` run against a real 40×20 test PNG (a rectangle +
+  "TEST" text) — output was exactly 100 bytes, matching the expected
+  1bpp-packed size `((40+7)/8) * 20`.
+- Wrote a small standalone C program that loads that exact `.bin` file
+  and calls `g15r_drawXBM(canvas, data, 40, 20, 10, 10)`, rendered
+  through the same PPM-preview approach the Custom Screens tab already
+  uses (no real hardware touched). Result: a clean, pixel-correct
+  render of the rectangle and text, positioned exactly at (10,10) as
+  requested — [confirmed by actually looking at the output image, not
+  assumed from the byte count alone].
+
+So this part of the plan is now genuinely verified, not inherited.
+Both pieces work, independently and together, in isolation from the
+real app. Integrating them into `g510_lcd_stats.c` and the GUI is a
+real implementation step, not yet done, but it's building on solid,
+checked ground rather than a documentation claim nobody had re-tested.
 
 So "the draw on display phase" = finishing this: letting you actually
 put an image on one of the L2-L5 screens, not just sensor bars and
