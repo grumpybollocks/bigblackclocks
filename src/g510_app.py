@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QGridLayout, QComboBox, QSlider, QPushButton, QLabel,
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame, QScrollArea,
+    QFileDialog,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen
@@ -619,8 +620,13 @@ CUSTOM_SCREEN_KEYS = ["L2", "L3", "L4", "L5"]
 SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
+MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
+CUSTOM_SCREEN_IMAGES_DIR = PROJECT_DIR / "custom_screen_images"
+
+
 def load_custom_screens():
-    """Returns {"L2": [ {sensor,style,x,y,width}, ... ], "L3": [...], ...}"""
+    """Returns {"L2": [ {kind:"sensor",sensor,style,x,y,width} or
+    {kind:"image",path,x,y,width,height}, ... ], "L3": [...], ...}"""
     config = {k: [] for k in CUSTOM_SCREEN_KEYS}
     if not CUSTOM_SCREENS_FILE.exists():
         return config
@@ -631,7 +637,7 @@ def load_custom_screens():
             key = line.split(" ", 1)[1]
             current = key if key in config else None
         elif line.startswith("ELEMENT ") and current:
-            el = {"sensor": "", "style": "number", "x": 0, "y": 0, "width": 40}
+            el = {"kind": "sensor", "sensor": "", "style": "number", "x": 0, "y": 0, "width": 40}
             for tok in line[len("ELEMENT "):].split():
                 if "=" not in tok:
                     continue
@@ -645,6 +651,21 @@ def load_custom_screens():
                     el[k] = v
             if el["sensor"]:
                 config[current].append(el)
+        elif line.startswith("IMAGE ") and current:
+            im = {"kind": "image", "path": "", "x": 0, "y": 0, "width": 0, "height": 0}
+            for tok in line[len("IMAGE "):].split():
+                if "=" not in tok:
+                    continue
+                k, v = tok.split("=", 1)
+                if k in ("x", "y", "width", "height"):
+                    try:
+                        im[k] = int(v)
+                    except ValueError:
+                        pass
+                elif k == "path":
+                    im[k] = v
+            if im["path"] and im["width"] > 0 and im["height"] > 0:
+                config[current].append(im)
     return config
 
 
@@ -653,11 +674,17 @@ def save_custom_screens(config):
     for key in CUSTOM_SCREEN_KEYS:
         lines.append(f"SCREEN {key}")
         for el in config[key]:
-            width = el.get("width", 40)
-            lines.append(
-                f"ELEMENT sensor={el['sensor']} style={el['style']} "
-                f"x={el['x']} y={el['y']} width={width}"
-            )
+            if el.get("kind") == "image":
+                lines.append(
+                    f"IMAGE path={el['path']} width={el['width']} height={el['height']} "
+                    f"x={el['x']} y={el['y']}"
+                )
+            else:
+                width = el.get("width", 40)
+                lines.append(
+                    f"ELEMENT sensor={el['sensor']} style={el['style']} "
+                    f"x={el['x']} y={el['y']} width={width}"
+                )
     CUSTOM_SCREENS_FILE.write_text("\n".join(lines) + "\n")
 
 
@@ -794,6 +821,13 @@ class ScreenPreviewCanvas(QWidget):
 
     def _element_rect(self, index):
         el = self._elements[index]
+        if el.get("kind") == "image":
+            # Images know their own exact size (set once at import time
+            # by png-to-lcd.py and never changes) -- no need for the
+            # C-reported .meta bounds that sensor elements need, since
+            # there's no font-metric unknown here.
+            return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
+                         el["width"] * PREVIEW_SCALE, el["height"] * PREVIEW_SCALE)
         b = self._bounds.get(index)
         if b and "label_x1" in b:
             # Real geometry: covers the label through the end of the
@@ -1029,6 +1063,10 @@ class CustomScreensTab(QWidget):
         add_btn.clicked.connect(self.on_add_element)
         panel_layout.addWidget(add_btn)
 
+        self.import_image_btn = QPushButton("Import Image...")
+        self.import_image_btn.clicked.connect(self.on_import_image)
+        panel_layout.addWidget(self.import_image_btn)
+
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setObjectName("Separator")
@@ -1087,6 +1125,7 @@ class CustomScreensTab(QWidget):
         self.sensor_combo.setEnabled(editable)
         self.style_combo.setEnabled(editable)
         self.add_btn.setEnabled(editable)
+        self.import_image_btn.setEnabled(editable)
         self.refresh_elements_list()
         self.refresh_preview()
 
@@ -1102,21 +1141,90 @@ class CustomScreensTab(QWidget):
         if self.current_screen == "L1":
             return  # button is disabled for this case, this is just a safety guard
         elements = self.config[self.current_screen]
-        if len(elements) >= 8:
-            QMessageBox.warning(self, "Screen full", "Each screen supports up to 8 elements.")
+        sensor_count = sum(1 for el in elements if el.get("kind", "sensor") == "sensor")
+        if sensor_count >= 8:
+            QMessageBox.warning(self, "Screen full", "Each screen supports up to 8 sensor elements.")
             return
         # No X/Y fields anymore -- new elements land at a default spot
         # (stacked below whatever's already there) and you drag them
         # into their real place on the preview. y wraps back to the top
         # once it'd run off the bottom of the 43px screen, rather than
         # placing something permanently off-screen.
-        default_y = (6 + 12 * len(elements)) % LCD_HEIGHT
+        default_y = (6 + 12 * sensor_count) % LCD_HEIGHT
         elements.append({
+            "kind": "sensor",
             "sensor": self.sensor_combo.currentData(),
             "style": self.style_combo.currentData(),
             "x": 6,
             "y": default_y,
             "width": 40,
+        })
+        save_custom_screens(self.config)
+        self.refresh_elements_list()
+        self.refresh_preview()
+
+    def on_import_image(self):
+        if self.current_screen == "L1":
+            return  # button is disabled for this case, this is just a safety guard
+        elements = self.config[self.current_screen]
+        image_count = sum(1 for el in elements if el.get("kind") == "image")
+        if image_count >= MAX_IMAGES_PER_SCREEN:
+            QMessageBox.warning(
+                self, "Screen full",
+                f"Each screen supports up to {MAX_IMAGES_PER_SCREEN} images -- "
+                "the 160x43 screen is small, more than that rarely fits usefully anyway."
+            )
+            return
+
+        src_path, _ = QFileDialog.getOpenFileName(
+            self, "Choose an image", str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+        )
+        if not src_path:
+            return
+
+        CUSTOM_SCREEN_IMAGES_DIR.mkdir(exist_ok=True)
+        # A stable, filesystem-safe name derived from the source file,
+        # with a numeric suffix if that name's already taken -- so
+        # re-importing the same file twice (or two different files with
+        # the same name) doesn't silently clobber an existing one.
+        stem = "".join(c if c.isalnum() else "_" for c in Path(src_path).stem) or "image"
+        out_path = CUSTOM_SCREEN_IMAGES_DIR / f"{stem}.bin"
+        n = 1
+        while out_path.exists():
+            out_path = CUSTOM_SCREEN_IMAGES_DIR / f"{stem}_{n}.bin"
+            n += 1
+
+        # No manual crop/resize UI -- trust png-to-lcd.py's own
+        # automatic resize + dithering (already Floyd-Steinberg,
+        # confirmed the right algorithm for this), matching the user's
+        # own stated preference for "minimum necessary" over a fiddly
+        # editor. 60px is a reasonable default max width for a 160px
+        # screen that likely also has sensor elements on it.
+        max_width = 60
+        png_to_lcd = PROJECT_DIR / "src" / "png-to-lcd.py"
+        try:
+            result = subprocess.run(
+                [sys.executable, str(png_to_lcd), src_path, str(out_path), str(max_width)],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Import failed", f"Couldn't run the converter: {e}")
+            return
+        if result.returncode != 0:
+            QMessageBox.critical(self, "Import failed", result.stderr.strip() or "Unknown error converting the image.")
+            return
+        try:
+            w, h = (int(x) for x in result.stdout.split())
+        except ValueError:
+            QMessageBox.critical(self, "Import failed", f"Unexpected converter output: {result.stdout!r}")
+            return
+
+        elements.append({
+            "kind": "image",
+            "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against PROJECT_DIR
+            "x": 6, "y": 6,
+            "width": w, "height": h,
         })
         save_custom_screens(self.config)
         self.refresh_elements_list()
@@ -1180,14 +1288,19 @@ class CustomScreensTab(QWidget):
         for i, el in enumerate(elements):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
-            label = SENSOR_LABELS.get(el["sensor"], el["sensor"])
             # Position/width shown on the canvas itself now (drag to
             # move, drag the handle to resize) -- repeating exact
             # coordinates here just made rows overflow the narrow panel
             # and need a horizontal scrollbar, so this stays short.
-            text = QLabel(f"{label} – {el['style']}")
+            if el.get("kind") == "image":
+                name = Path(el["path"]).stem
+                text = QLabel(f"Image: {name}")
+                text.setToolTip(f"x={el['x']} y={el['y']} {el['width']}x{el['height']}px")
+            else:
+                label = SENSOR_LABELS.get(el["sensor"], el["sensor"])
+                text = QLabel(f"{label} – {el['style']}")
+                text.setToolTip(f"x={el['x']} y={el['y']}" + (f" width={el.get('width', 40)}" if el.get("style") == "bar" else ""))
             text.setStyleSheet("font-size: 11px;")
-            text.setToolTip(f"x={el['x']} y={el['y']}" + (f" width={el.get('width', 40)}" if el.get("style") == "bar" else ""))
             row.addWidget(text)
             row.addStretch()
             remove_btn = QPushButton("✕")

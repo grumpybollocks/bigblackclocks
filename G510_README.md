@@ -27,7 +27,7 @@ Two real bugs found and fixed while building this (both matter beyond v1.1, keep
 1. `g510_lcd_stats.c`'s compile command was missing FreeType/TTF flags that `libg15render.so` was actually built with. Without them, this program's view of the `g15canvas` struct is SMALLER than what the library writes into (it has extra `FT_Library`/`FT_Face` fields gated by `#ifdef TTF_SUPPORT`) — `g15r_initCanvas()` then writes past the end of the stack-allocated struct. This was a LATENT bug in v1.0 too (silently landed on stack padding, never tripped anything visible) until v1.1's extra locals shifted it onto the stack canary, causing "stack smashing detected" aborts. Confirmed via AddressSanitizer (no heap/logic bug, only leaked FreeType init allocations — harmless) plus a direct A/B compile with and without stack-protector. Fix: `#define TTF_SUPPORT` + FreeType headers before `#include <libg15render.h>`, and compile with `$(pkg-config --cflags freetype2) ... $(pkg-config --libs freetype2)`. This is now in `install.sh`, `scripts/rebuild.sh`, and the source file itself — if you ever hand-compile this file, use the same flags or it WILL crash intermittently.
 2. `fonts/lcd-label-8.fnt` (the converted Eurostile Bold label font) had a corrupted 'S' glyph (rendered as something closer to a '6'). Never caught before because no existing label (CPU/RAM/VRAM/TEMP/MAX) contained the letter S — v1.1's "SWAP" and "DISK" labels hit it immediately. Fixed by reconverting from the original source font (`/usr/local/share/fonts/e/Eurostile_Bold.otf`) via `g15fontconvert -s 8 -i <otf> -o fonts/lcd-label-8.fnt`. Verified by rendering the full A-Z alphabet plus every actual label string used in the sensor table — all clean now, and the pre-existing CPU/RAM/VRAM/TEMP screen was re-verified pixel-for-pixel unchanged.
 
-PNG/image placement on custom screens (the OLDER Phase 2 idea, before the user reprioritized) is DEPRIORITIZED, not built into the Custom Screens tab. `src/png-to-lcd.py` and `g15r_drawXBM()` still exist and still work if this ever comes back, but they are NOT wired into anything current — don't assume they're part of the live feature set.
+**PNG/image placement is now built** (2026-09-14, see `G510_DRAW_ON_DISPLAY_PLAN.md`) — an "Import Image..." button in the Custom Screens panel converts and places a PNG (or other Pillow-readable image) on the current screen, draggable like a sensor element, using `src/png-to-lcd.py` and `g15r_drawXBM()` for real now, not just "ready for later."
 
 ## v1.0 section
 
@@ -51,7 +51,7 @@ Turns the Logitech G510s keyboard's built-in LCD into a live CPU/RAM/VRAM/TEMP d
 | `g510_canvas.py` | Real keyboard-shaped canvas for the Backlight + G-Keys tab -- `QPainter`-based rendering, per-key `Cell` geometry. See `G510_CANVAS_PLAN.md`. |
 | `g510_lcd_stats.c` | draws the screen(s), the main program |
 | `g510_lcd_buttons.c` | listens for L1-L5 presses |
-| `png-to-lcd.py` | PNG -> raw XBM bitmap converter, verified working, ready for Phase 2 to call |
+| `png-to-lcd.py` | PNG -> raw 1bpp bitmap converter, called by the GUI's "Import Image..." button |
 | `g510-lcd-stats.service` | systemd --user unit for the above |
 | `g510-lcd-buttons.service` | systemd --user unit for the above |
 | `99-g510-lcd.rules` | udev rules (see PERSISTENCE below) |

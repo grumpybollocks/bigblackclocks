@@ -511,6 +511,7 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
 }
 
 #define MAX_ELEMENTS 8
+#define MAX_IMAGES 2 /* the screen is 160x43 -- rarely useful to fit more than this */
 #define MAX_CUSTOM_SCREENS 4 /* L2, L3, L4, L5 */
 
 typedef struct {
@@ -520,9 +521,24 @@ typedef struct {
     int width; /* bar length in px, only meaningful for style="bar" -- ignored for "number" */
 } element_t;
 
+/* A converted-to-1bpp image placed on a custom screen -- see
+   src/png-to-lcd.py (the conversion step) and draw_image_element()
+   below (the render step, reusing g15r_drawXBM(), both already
+   verified working independently and together before this was wired
+   in). No resize in this first version -- width/height are fixed at
+   import time by png-to-lcd.py's max_width parameter and the source
+   image's own aspect ratio; only position (x, y) is editable, via the
+   same drag mechanic as sensor elements. */
+typedef struct {
+    char path[128]; /* relative to PROJECT_DIR, e.g. "custom_screen_images/logo.bin" */
+    int x, y, width, height;
+} image_t;
+
 typedef struct {
     element_t elements[MAX_ELEMENTS];
     int count;
+    image_t images[MAX_IMAGES];
+    int image_count;
 } custom_screen_t;
 
 static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
@@ -531,7 +547,10 @@ static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
    edits made live in the GUI show up on the next frame without needing
    the daemon restarted. */
 static void load_custom_screens(void) {
-    for (int i = 0; i < MAX_CUSTOM_SCREENS; i++) custom_screens[i].count = 0;
+    for (int i = 0; i < MAX_CUSTOM_SCREENS; i++) {
+        custom_screens[i].count = 0;
+        custom_screens[i].image_count = 0;
+    }
     FILE *f = fopen(CUSTOM_SCREENS_PATH, "r");
     if (!f) return;
     char line[256];
@@ -565,6 +584,27 @@ static void load_custom_screens(void) {
                 tok = strtok(NULL, " ");
             }
             if (el->sensor[0]) cs->count++;
+        } else if (strncmp(line, "IMAGE ", 6) == 0 && current >= 0) {
+            custom_screen_t *cs = &custom_screens[current];
+            if (cs->image_count >= MAX_IMAGES) continue;
+            image_t *im = &cs->images[cs->image_count];
+            im->path[0] = 0; im->x = 0; im->y = 0; im->width = 0; im->height = 0;
+            char rest[256];
+            strncpy(rest, line + 6, sizeof(rest) - 1);
+            rest[sizeof(rest) - 1] = 0;
+            char *tok = strtok(rest, " ");
+            while (tok) {
+                char key[32], val[192];
+                if (sscanf(tok, "%31[^=]=%191s", key, val) == 2) {
+                    if (strcmp(key, "path") == 0) strncpy(im->path, val, sizeof(im->path) - 1);
+                    else if (strcmp(key, "x") == 0) im->x = atoi(val);
+                    else if (strcmp(key, "y") == 0) im->y = atoi(val);
+                    else if (strcmp(key, "width") == 0) im->width = atoi(val);
+                    else if (strcmp(key, "height") == 0) im->height = atoi(val);
+                }
+                tok = strtok(NULL, " ");
+            }
+            if (im->path[0] && im->width > 0 && im->height > 0) cs->image_count++;
         }
     }
     fclose(f);
@@ -648,11 +688,33 @@ static void write_bounds_meta(const char *outpath) {
     fclose(f);
 }
 
+/* Loads a converted 1bpp image (see src/png-to-lcd.py) and draws it via
+   g15r_drawXBM() -- same function, same call shape, already verified
+   working end to end (both the conversion step and this render step)
+   before this was wired into the real custom-screen system. Silently
+   does nothing if the file can't be read (e.g. it was deleted by hand)
+   rather than crashing the whole screen over one missing image. */
+static void draw_image_element(g15canvas *c, image_t *im) {
+    char full_path[300];
+    snprintf(full_path, sizeof(full_path), "%s/%s", PROJECT_DIR, im->path);
+    FILE *f = fopen(full_path, "rb");
+    if (!f) return;
+    long expected = (long)((im->width + 7) / 8) * im->height;
+    unsigned char *data = malloc(expected);
+    if (!data) { fclose(f); return; }
+    size_t got = fread(data, 1, expected, f);
+    fclose(f);
+    if ((long)got == expected) {
+        g15r_drawXBM(c, data, im->width, im->height, im->x, im->y);
+    }
+    free(data);
+}
+
 static void draw_custom_screen(g15canvas *c, int screen_num) {
     g_element_bounds_count = 0;
     load_custom_screens();
     custom_screen_t *cs = &custom_screens[screen_num - 2];
-    if (cs->count == 0) {
+    if (cs->count == 0 && cs->image_count == 0) {
         char label[8];
         snprintf(label, sizeof(label), "L%d", screen_num);
         g15r_G15FPrint(c, label, 0, 8, G15_TEXT_LARGE, G15_JUSTIFY_CENTER, G15_COLOR_BLACK, 0);
@@ -660,6 +722,7 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
         return;
     }
     for (int i = 0; i < cs->count; i++) draw_element(c, &cs->elements[i]);
+    for (int i = 0; i < cs->image_count; i++) draw_image_element(c, &cs->images[i]);
 }
 
 int main(int argc, char **argv) {
