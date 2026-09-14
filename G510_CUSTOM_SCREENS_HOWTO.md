@@ -20,12 +20,18 @@ the L2-L5 buttons on the keyboard. Here's the whole thing, short version.
    you see it. Wherever you drop it is where it'll show up on the real
    keyboard screen.
 
-4. **Resize a bar** — hover your mouse near a bar and a little blue
+4. **Put an image on it** — click **Import Image...**, pick a picture
+   from your computer, and it gets shrunk down and converted
+   automatically to fit the tiny black-and-white screen. Drag it around
+   like anything else. (No resizing images yet — pick one that's
+   already roughly the right size, or just re-import it.)
+
+5. **Resize a bar** — hover your mouse near a bar and a little blue
    square appears at its right end. Drag that to make the bar longer
    or shorter. (Number-style items don't have this — there's nothing
    to resize, it's just text.)
 
-5. **Remove something** — click the ✕ next to it in the list on the
+6. **Remove something** — click the ✕ next to it in the list on the
    right.
 
 That's it. **Nothing needs a Save button** — every change (move,
