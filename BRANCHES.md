@@ -4,6 +4,15 @@ This repo holds two independent apps for two different Logitech keyboards.
 Keeping this file up to date is the whole point of it -- if a branch's
 purpose changes, update its entry here in the same commit.
 
+## Two machines, two keyboards
+
+This repo is worked on from two machines, each with only one of the two
+keyboards physically attached: AC130arch has the G910, AC130Tria has the
+G510s. Each machine's session should only be doing active development on
+the branch for the keyboard it actually has -- don't start G510s work
+from AC130arch or vice versa, since neither side can test on the real
+hardware for the other keyboard.
+
 ## Active branches
 
 - **`main`** -- the merged trunk. Contains both apps: the G510s app
@@ -12,22 +21,26 @@ purpose changes, update its entry here in the same commit.
   the other app's files -- verified at merge time that every G510s
   file the G910 side differed on was untouched by G910 development
   (pure drift from G510s's own later history), so the merge was
-  clean with no real conflict resolution needed.
-- **`g510s`** -- active G510s development. Forked from `main` at
-  `5cf7a89` (2026-09-14), the last commit before G910 was merged in,
-  so it's the G510s app exactly as it stood on `main`, with no G910
-  files at all. Further G510s work happens here and gets merged back
-  into `main` when a feature is done.
-- **`g910`** -- active G910 development. Used to point at an older,
-  pre-canvas-rewrite snapshot; fast-forwarded on 2026-09-14 to match
-  `g910-canvas`'s tip (a real fast-forward, nothing rewritten or
-  deleted -- the old commit it used to point at is still reachable as
-  an ancestor of `g910-canvas`, and separately tagged
-  `g910-skeleton-v1-buttongrid`). Further G910 work happens here and
-  gets merged back into `main` when a feature is done.
+  clean with no real conflict resolution needed. Also carries the
+  Custom Screens image-import feature merged in from AC130Tria the
+  same day.
+- **`g510s-dev`** -- active G510s development, driven from AC130Tria
+  (the machine with that keyboard). This is the canonical branch for
+  ongoing G510s work; merges back into `main` when a feature is done.
+- **`g910`** -- active G910 development, driven from AC130arch (this
+  machine). Used to point at an older, pre-canvas-rewrite snapshot;
+  fast-forwarded on 2026-09-14 to match `g910-canvas`'s tip (a real
+  fast-forward, nothing rewritten or deleted -- the old commit it used
+  to point at is still reachable as an ancestor of `g910-canvas`, and
+  separately tagged `g910-skeleton-v1-buttongrid`). Merges back into
+  `main` when a feature is done.
 
 ## Historical / frozen branches (kept for reference, not deleted)
 
+- **`g510s`** -- a local-only branch created on AC130arch on
+  2026-09-14 before realizing this machine doesn't have a G510s to
+  develop against -- `g510s-dev` (above) is the real one. Left in
+  place, unpushed, per the no-delete rule; not used going forward.
 - **`g910-canvas`** -- the full blow-by-blow G910 development history:
   HID++ protocol reverse-engineering, every real bug found and fixed,
   the canvas UI rearchitecture. `g910` now points at the same commit;
