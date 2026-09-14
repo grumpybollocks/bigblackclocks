@@ -549,6 +549,24 @@ static void load_custom_screens(void) {
     fclose(f);
 }
 
+/* Real rendered bounds per element, recorded every time draw_element()
+   runs -- so the GUI editor can position drag/resize hit-boxes exactly
+   where things actually are instead of guessing. Python has no way to
+   compute label_w itself (that needs the label font's real glyph
+   metrics), which is exactly what made the old fixed-offset resize
+   handle drift away from the real bar -- "hard to control", reported
+   directly. Emitted as a sidecar file only in --preview mode (see
+   main()); the live LCD-writing path never touches this, zero cost
+   there. */
+typedef struct {
+    int label_x1, label_y1, label_x2, label_y2; /* covers just the label glyph */
+    int is_bar;
+    int bar_x1, bar_x2, bar_y1, bar_y2;           /* only valid if is_bar */
+} element_bounds_t;
+
+static element_bounds_t g_element_bounds[MAX_ELEMENTS];
+static int g_element_bounds_count = 0;
+
 static void draw_element(g15canvas *c, element_t *el) {
     const sensor_def_t *def = find_sensor(el->sensor);
     if (!def) return;
@@ -560,6 +578,14 @@ static void draw_element(g15canvas *c, element_t *el) {
     int label_w = g15r_testG15FontWidth(label_font, (char*)def->label);
     int value_x = el->x + label_w + 4;
 
+    element_bounds_t *b = (g_element_bounds_count < MAX_ELEMENTS)
+        ? &g_element_bounds[g_element_bounds_count++] : NULL;
+    if (b) {
+        b->label_x1 = el->x; b->label_y1 = el->y;
+        b->label_x2 = el->x + label_w; b->label_y2 = el->y + label_font->font_height;
+        b->is_bar = 0;
+    }
+
     /* "bar" only ever applies to a sensor with an honest 0-100 scale
        (a true percent, or a temperature via the same 0-90C convention
        already used on the built-in stats screen). Anything else silently
@@ -569,12 +595,40 @@ static void draw_element(g15canvas *c, element_t *el) {
         int bar_x2 = bar_x1 + el->width;
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
         g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, bar_x2 + 4, el->y);
+        if (b) {
+            b->is_bar = 1;
+            b->bar_x1 = bar_x1; b->bar_x2 = bar_x2;
+            b->bar_y1 = el->y; b->bar_y2 = el->y + BAR_H;
+        }
     } else {
         g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, value_x, el->y);
     }
 }
 
+/* Writes the bounds sidecar for --preview mode. Plain text, one line
+   per element in the same order load_custom_screens() produced them
+   (matches the GUI's own element list index-for-index). */
+static void write_bounds_meta(const char *outpath) {
+    char meta_path[300];
+    snprintf(meta_path, sizeof(meta_path), "%s.meta", outpath);
+    FILE *f = fopen(meta_path, "w");
+    if (!f) return;
+    for (int i = 0; i < g_element_bounds_count; i++) {
+        element_bounds_t *b = &g_element_bounds[i];
+        if (b->is_bar) {
+            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d bar_x1=%d bar_y1=%d bar_x2=%d bar_y2=%d\n",
+                    i, b->label_x1, b->label_y1, b->label_x2, b->label_y2,
+                    b->bar_x1, b->bar_y1, b->bar_x2, b->bar_y2);
+        } else {
+            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d\n",
+                    i, b->label_x1, b->label_y1, b->label_x2, b->label_y2);
+        }
+    }
+    fclose(f);
+}
+
 static void draw_custom_screen(g15canvas *c, int screen_num) {
+    g_element_bounds_count = 0;
     load_custom_screens();
     custom_screen_t *cs = &custom_screens[screen_num - 2];
     if (cs->count == 0) {
@@ -601,8 +655,10 @@ int main(int argc, char **argv) {
         g15r_initCanvas(&canvas);
         update_net_speed();
         if (screen == 1) draw_clock_screen(&canvas);
-        else if (screen >= 2 && screen <= 5) draw_custom_screen(&canvas, screen);
-        else draw_stats_screen(&canvas);
+        else if (screen >= 2 && screen <= 5) {
+            draw_custom_screen(&canvas, screen);
+            write_bounds_meta(outpath);
+        } else draw_stats_screen(&canvas);
         write_ppm(&canvas, outpath);
         return 0;
     }

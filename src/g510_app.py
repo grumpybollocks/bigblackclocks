@@ -653,50 +653,88 @@ def save_custom_screens(config):
     CUSTOM_SCREENS_FILE.write_text("\n".join(lines) + "\n")
 
 
+def _parse_bounds_meta(meta_path):
+    """Parses the .meta sidecar --preview writes alongside the image for
+    custom screens: real per-element pixel bounds computed with the
+    label font's actual glyph metrics, which Python has no way to
+    compute itself. Returns {index: {"label_x1":.., ..., "bar_x1":.. (bar
+    elements only)}}. Missing/unreadable file -> empty dict, callers
+    fall back to an approximation rather than crashing."""
+    bounds = {}
+    try:
+        text = meta_path.read_text()
+    except Exception:
+        return bounds
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            idx = int(parts[0])
+        except ValueError:
+            continue
+        entry = {}
+        for tok in parts[1:]:
+            if "=" not in tok:
+                continue
+            k, v = tok.split("=", 1)
+            try:
+                entry[k] = int(v)
+            except ValueError:
+                pass
+        bounds[idx] = entry
+    return bounds
+
+
 def render_preview(screen_num):
     """Runs the same C binary that draws the real LCD, in one-shot
-    --preview mode, and returns a QPixmap -- guaranteed pixel-identical
-    to what the real screen shows, since it's the same drawing code."""
+    --preview mode, and returns (QPixmap, bounds, err) -- the pixmap is
+    guaranteed pixel-identical to what the real screen shows, since
+    it's the same drawing code. bounds is real per-element pixel
+    geometry (see _parse_bounds_meta), empty dict for non-custom
+    screens or if the sidecar wasn't written."""
     if not STATS_BINARY.exists():
-        return None, "Not built yet -- run install.sh or rebuild the C programs."
+        return None, {}, "Not built yet -- run install.sh or rebuild the C programs."
     out_path = Path("/tmp/g510_app_preview.ppm")
+    meta_path = Path(str(out_path) + ".meta")
     try:
         result = subprocess.run(
             [str(STATS_BINARY), "--preview", str(screen_num), str(out_path)],
             capture_output=True, text=True, timeout=5,
         )
         if result.returncode != 0:
-            return None, f"Preview render failed: {result.stderr.strip()}"
+            return None, {}, f"Preview render failed: {result.stderr.strip()}"
     except Exception as e:
-        return None, f"Couldn't run preview: {e}"
+        return None, {}, f"Couldn't run preview: {e}"
 
     try:
         data = out_path.read_bytes()
     except Exception as e:
-        return None, f"Couldn't read preview output: {e}"
+        return None, {}, f"Couldn't read preview output: {e}"
 
     # Minimal hand-rolled P6 PPM parser -- avoids depending on Qt's
     # optional ppm plugin being present on whatever system this runs on.
     if not data.startswith(b"P6"):
-        return None, "Preview output wasn't a valid PPM image."
+        return None, {}, "Preview output wasn't a valid PPM image."
     parts = data.split(b"\n", 3)
     if len(parts) < 4:
-        return None, "Malformed PPM header."
+        return None, {}, "Malformed PPM header."
     try:
         w, h = (int(x) for x in parts[1].split())
     except ValueError:
-        return None, "Malformed PPM header."
+        return None, {}, "Malformed PPM header."
     pixels = parts[3]
     img = QImage(w, h, QImage.Format_RGB888)
     if len(pixels) < w * h * 3:
-        return None, "Truncated PPM data."
+        return None, {}, "Truncated PPM data."
     for y in range(h):
         row_start = y * w * 3
         img.scanLine(y)  # ensure detach
         for x in range(w):
             i = row_start + x * 3
             img.setPixel(x, y, (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2])
-    return QPixmap.fromImage(img), None
+    bounds = _parse_bounds_meta(meta_path)
+    return QPixmap.fromImage(img), bounds, None
 
 
 PREVIEW_SCALE = 4
@@ -729,6 +767,7 @@ class ScreenPreviewCanvas(QWidget):
         super().__init__()
         self._pixmap = None
         self._elements = []
+        self._bounds = {}   # index -> real pixel geometry from the C renderer, see _parse_bounds_meta
         self._drag_index = None
         self._drag_offset = QPoint(0, 0)
         self._resize_index = None
@@ -738,26 +777,46 @@ class ScreenPreviewCanvas(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
 
-    def set_data(self, pixmap, elements):
+    def set_data(self, pixmap, elements, bounds=None):
         self._pixmap = pixmap
         self._elements = elements
+        self._bounds = bounds or {}
         self.update()
 
-    def _element_rect(self, el):
+    def _element_rect(self, index):
+        el = self._elements[index]
+        b = self._bounds.get(index)
+        if b and "label_x1" in b:
+            # Real geometry: covers the label through the end of the
+            # bar (if any), so the whole visible element is grabbable,
+            # not just an approximate box that might miss a long label
+            # or a short/long bar.
+            x1, y1 = b["label_x1"], b["label_y1"]
+            x2 = b.get("bar_x2", b["label_x2"] + 30)  # +30 is a light pad for the value text on number-style, which has no measured width either
+            y2 = max(b["label_y2"], b.get("bar_y2", 0))
+            return QRect(x1 * PREVIEW_SCALE, y1 * PREVIEW_SCALE,
+                         (x2 - x1) * PREVIEW_SCALE, (y2 - y1) * PREVIEW_SCALE)
+        # Fallback for the brief window before the first real preview
+        # has come back (or if the metadata sidecar is ever missing) --
+        # approximate, not pixel-accurate, but never crashes.
         return QRect(
             el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
             ELEMENT_HIT_W * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE,
         )
 
-    def _resize_handle_rect(self, el):
-        # Anchored to the right edge of the same approximate hit box
-        # used for dragging -- not pixel-aligned with the real rendered
-        # bar end (Python doesn't know the exact label width the C
-        # renderer computes), but consistent and easy to grab; the live
-        # preview during drag shows the actual real effect.
+    def _resize_handle_rect(self, index):
+        el = self._elements[index]
+        b = self._bounds.get(index)
+        r = RESIZE_HANDLE_PX * PREVIEW_SCALE
+        if b and "bar_x2" in b:
+            # Exactly where the real bar ends -- this is the fix for
+            # the handle drifting away from the actual bar, reported
+            # directly as the preview being "hard to control."
+            hx = b["bar_x2"] * PREVIEW_SCALE
+            hy = ((b["bar_y1"] + b["bar_y2"]) * PREVIEW_SCALE) // 2
+            return QRect(hx - r, hy - r, r * 2, r * 2)
         hx = el["x"] * PREVIEW_SCALE + ELEMENT_HIT_W * PREVIEW_SCALE
         hy = el["y"] * PREVIEW_SCALE + (ELEMENT_HIT_H * PREVIEW_SCALE) // 2
-        r = RESIZE_HANDLE_PX * PREVIEW_SCALE
         return QRect(hx - r, hy - r, r * 2, r * 2)
 
     def _element_at(self, pos):
@@ -765,14 +824,14 @@ class ScreenPreviewCanvas(QWidget):
         # in reverse so an overlapping newer element wins, matching what
         # you'd visually expect to grab.
         for i in range(len(self._elements) - 1, -1, -1):
-            if self._element_rect(self._elements[i]).contains(pos):
+            if self._element_rect(i).contains(pos):
                 return i
         return None
 
     def _resize_handle_at(self, pos):
         for i in range(len(self._elements) - 1, -1, -1):
             el = self._elements[i]
-            if el.get("style") == "bar" and self._resize_handle_rect(el).contains(pos):
+            if el.get("style") == "bar" and self._resize_handle_rect(i).contains(pos):
                 return i
         return None
 
@@ -780,16 +839,16 @@ class ScreenPreviewCanvas(QWidget):
         painter = QPainter(self)
         if self._pixmap is not None:
             painter.drawPixmap(0, 0, self._pixmap)
-        for el in self._elements:
+        for i, el in enumerate(self._elements):
             if el.get("style") == "bar":
                 painter.setPen(QPen(QColor(120, 120, 120), 1))
                 painter.setBrush(QColor(70, 140, 230, 180))
-                painter.drawRect(self._resize_handle_rect(el))
+                painter.drawRect(self._resize_handle_rect(i))
         active = self._drag_index if self._drag_index is not None else self._resize_index
         if active is not None:
             painter.setPen(QPen(QColor(70, 140, 230), 2, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._element_rect(self._elements[active]))
+            painter.drawRect(self._element_rect(active))
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
@@ -1040,17 +1099,22 @@ class CustomScreensTab(QWidget):
         self.refresh_preview()
 
     def on_element_dragged(self, index, x, y):
-        # Called continuously while dragging. The actual re-render is
-        # handled by drag_refresh_timer (started on drag_started, at a
-        # fixed ~120ms cadence) rather than here on every single pixel
-        # of mouse movement -- that would spawn a subprocess call per
-        # frame during a fast drag and stutter badly. This just keeps
-        # the (x, y) text in the element list live and cheap.
+        # Called continuously while dragging. Saving here (a cheap text
+        # write, not the render itself) is what actually makes the live
+        # preview live -- render_preview() runs the real C binary,
+        # which reads custom_screens.txt fresh from disk every time.
+        # Without saving mid-drag, the drag_refresh_timer's periodic
+        # refresh_preview() calls kept re-rendering the OLD saved
+        # position the whole time you were dragging -- only the dashed
+        # selection outline moved with the mouse, the actual rendered
+        # bar/label stayed frozen until release. Real bug, reported
+        # directly as the preview being "hard to control."
+        save_custom_screens(self.config)
         self.refresh_elements_list()
 
     def on_element_resized(self, index, width):
-        # Same idea as on_element_dragged, separate handler because the
-        # signal shape is different (index, width) vs (index, x, y).
+        # Same idea and same fix as on_element_dragged.
+        save_custom_screens(self.config)
         self.refresh_elements_list()
 
     def on_drag_started(self):
@@ -1099,7 +1163,7 @@ class CustomScreensTab(QWidget):
         self.elements_layout.addStretch()
 
     def refresh_preview(self):
-        pixmap, err = render_preview(self.screen_number())
+        pixmap, bounds, err = render_preview(self.screen_number())
         if pixmap is None:
             print(f"Custom Screens preview error: {err}")  # surfaced in the panel below instead of blocking the canvas
             return
@@ -1107,7 +1171,7 @@ class CustomScreensTab(QWidget):
             LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE,
             Qt.KeepAspectRatio, Qt.FastTransformation,
         )
-        self.preview_canvas.set_data(scaled, self.config[self.current_screen])
+        self.preview_canvas.set_data(scaled, self.config[self.current_screen], bounds)
 
 
 class MainWindow(QMainWindow):
