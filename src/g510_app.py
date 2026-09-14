@@ -508,6 +508,18 @@ class KeyboardTab(QWidget):
         self.current_profile = name
         self.canvas.set_active_mkey(name)
         self.refresh_assigned_keys()
+        # Real bug, found via live use: clicking M1/M2/M3 here used to
+        # be GUI-only -- the daemon (which decides what a physical
+        # G-key press actually replays) never learned about it, and
+        # the poll below would revert the highlight right back within
+        # 500ms. Writing the same file the daemon itself writes makes
+        # this a real profile switch, not a cosmetic one -- and makes
+        # this call idempotent when poll_hardware_state calls it after
+        # reading an unchanged file (same value written back, harmless).
+        try:
+            active_profile_file().write_text(name)
+        except Exception:
+            pass  # matches the daemon's own best-effort LED write
 
     def refresh_assigned_keys(self):
         """Which G-keys have a macro in the CURRENT profile -- drawn

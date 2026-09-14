@@ -1,0 +1,5 @@
+SCREEN L2
+ELEMENT sensor=CPU_PCT style=number x=6 y=3
+SCREEN L3
+SCREEN L4
+SCREEN L5

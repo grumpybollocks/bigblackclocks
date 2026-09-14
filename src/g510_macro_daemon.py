@@ -55,40 +55,91 @@ def load_macros():
     return {"M1": {}, "M2": {}, "M3": {}}
 
 
-def write_active_profile(name):
+def profile_path():
     import os
     runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-    Path(runtime, "g510_macro_profile").write_text(name)
+    return Path(runtime, "g510_macro_profile")
+
+
+def write_active_profile(name):
+    profile_path().write_text(name)
 
 
 def main():
+    """Real bug, found via live use after the canvas rearchitecture:
+    this loop used to be a blocking dev.read_loop() that only ever
+    learned about a profile switch from a PHYSICAL M-key press -- a
+    GUI click on M1/M2/M3 wrote nothing this daemon could see, so the
+    GUI's own poll would revert its highlight back within ~500ms
+    (matching the file this daemon owns), while a real physical G-key
+    press would still replay whatever THIS daemon's stale in-memory
+    active_profile said -- a genuine GUI-shows-one-thing,
+    keyboard-does-another mismatch, not just a cosmetic flicker.
+
+    Fixed the same way RecorderThread (g510_app.py) already solved an
+    unrelated "need to notice something besides blocking device reads"
+    problem: select() with a short timeout instead of a blocking loop,
+    so this can also check the profile file for GUI-initiated changes
+    a few times a second, and actually adopt them (update the LED,
+    update what G-key presses replay) instead of only ever reacting to
+    the physical M-keys."""
+    import select
+
     dev = evdev.InputDevice(DEVICE_PATH)
+    pf = profile_path()
+
     active_profile = "M1"
     write_active_profile(active_profile)
     light_profile_led(active_profile)
+    last_mtime = pf.stat().st_mtime
 
-    for event in dev.read_loop():
-        if event.type != ecodes.EV_KEY or event.value != 1:  # key-down only
+    def adopt_profile(name):
+        nonlocal active_profile, last_mtime
+        active_profile = name
+        light_profile_led(active_profile)
+        last_mtime = pf.stat().st_mtime
+
+    while True:
+        r, _, _ = select.select([dev.fd], [], [], 0.2)
+        if r:
+            for event in dev.read():
+                if event.type != ecodes.EV_KEY or event.value != 1:  # key-down only
+                    continue
+
+                if event.code in M_KEY_CODES:
+                    write_active_profile(M_KEY_CODES[event.code])
+                    adopt_profile(M_KEY_CODES[event.code])
+                    continue
+
+                if event.code in G_KEY_CODES:
+                    gkey = G_KEY_CODES[event.code]
+                    macros = load_macros()  # reload each time -- app may have just saved a new one
+                    entry = macros.get(active_profile, {}).get(gkey)
+                    if not entry:
+                        continue
+                    if isinstance(entry, str):  # legacy format, pre-command-support
+                        subprocess.run(["ydotool", "key"] + entry.split())
+                    elif entry.get("type") == "command":
+                        subprocess.run(entry["value"], shell=True)
+                    else:  # type == "keys"
+                        subprocess.run(["ydotool", "key"] + entry["value"].split())
+
+        # Pick up a GUI-initiated profile switch too -- the file's
+        # mtime only moves when something (us, or the GUI) actually
+        # writes it, so this is cheap to check every ~0.2s.
+        try:
+            mtime = pf.stat().st_mtime
+        except FileNotFoundError:
             continue
-
-        if event.code in M_KEY_CODES:
-            active_profile = M_KEY_CODES[event.code]
-            write_active_profile(active_profile)
-            light_profile_led(active_profile)
-            continue
-
-        if event.code in G_KEY_CODES:
-            gkey = G_KEY_CODES[event.code]
-            macros = load_macros()  # reload each time -- app may have just saved a new one
-            entry = macros.get(active_profile, {}).get(gkey)
-            if not entry:
-                continue
-            if isinstance(entry, str):  # legacy format, pre-command-support
-                subprocess.run(["ydotool", "key"] + entry.split())
-            elif entry.get("type") == "command":
-                subprocess.run(entry["value"], shell=True)
-            else:  # type == "keys"
-                subprocess.run(["ydotool", "key"] + entry["value"].split())
+        if mtime != last_mtime:
+            try:
+                external = pf.read_text().strip()
+            except Exception:
+                external = None
+            if external in M_LEDS and external != active_profile:
+                adopt_profile(external)
+            else:
+                last_mtime = mtime  # not a valid/new profile -- don't keep re-checking the same write
 
 
 if __name__ == "__main__":
