@@ -53,6 +53,9 @@ hardware for the other keyboard.
 
 - `v1.0` / `g510-v1.0`-equivalent -- G510s v1.0.
 - `g910-v1.0` -- G910 app v1.0, tagged after a full bug-check pass.
+- `g910-v1.1` -- G910 phase 1 wrap-up: Profiles panel overflow fix,
+  GUI-daemon profile desync fix, gold-border assigned-key indicator,
+  manual hex colour entry. Merged into `main`.
 - `g910-gui-v1` -- G910 reaching a single unified canvas-based GUI.
 - `g910-skeleton-v1-buttongrid` -- G910's pre-canvas button-grid UI,
   permanent record before the canvas rearchitecture.
