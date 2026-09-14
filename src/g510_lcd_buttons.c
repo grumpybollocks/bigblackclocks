@@ -4,8 +4,16 @@
 #include <time.h>
 #include <linux/input.h>
 
-#define BUTTON_LOG_FILE   "/home/alextria/.local/share/g510lcd-buttons.log"
 #define NUM_SCREENS 2
+
+/* User-specific by nature -- built at runtime from $HOME rather than
+   baked in at compile time, so this file doesn't hardcode a username. */
+static const char *button_log_path(void) {
+    static char path[256];
+    const char *home = getenv("HOME");
+    snprintf(path, sizeof(path), "%s/.local/share/g510lcd-buttons.log", home ? home : "/tmp");
+    return path;
+}
 
 static const char *screen_state_path(void) {
     static char path[256];
@@ -42,7 +50,7 @@ static void write_screen(int s) {
 }
 
 static void log_button(const char *name) {
-    FILE *f = fopen(BUTTON_LOG_FILE, "a");
+    FILE *f = fopen(button_log_path(), "a");
     if (!f) return;
     time_t now = time(NULL);
     char buf[32];

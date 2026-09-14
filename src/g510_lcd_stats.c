@@ -280,8 +280,25 @@ static void draw_slim_bar(g15canvas *c, int x1, int x2, int y, int h, int pct) {
 static g15font *label_font = NULL;
 
 #define LABEL_Y_OFFSET 3 /* Eurostile's metrics sit higher than the number font's */
-#define FONT_PATH "/home/alextria/Desktop/System-Fixes/G510LCD/fonts/lcd-label-8.fnt"
-#define CUSTOM_SCREENS_PATH "/home/alextria/Desktop/System-Fixes/G510LCD/custom_screens.txt"
+
+/* PROJECT_DIR is passed at compile time by install.sh/rebuild.sh
+   (-DPROJECT_DIR='"'$DIR'"') so this file doesn't hardcode a username
+   or a specific checkout location. The fallback below only matters if
+   someone hand-compiles this outside those scripts -- edit it for
+   your own checkout in that case. */
+#ifndef PROJECT_DIR
+#define PROJECT_DIR "/home/alextria/Desktop/System-Fixes/G510LCD"
+#endif
+#define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
+#define CUSTOM_SCREENS_PATH PROJECT_DIR "/custom_screens.txt"
+
+/* This one's tied to an actual mounted drive on the machine this was
+   built for, not just a username baked in for no reason -- there's no
+   portable "right" answer to substitute. EDIT THIS for your own setup
+   if the DISK_FRIGIDER_PCT sensor matters to you (or just don't use
+   that sensor -- it already handles the path not existing by showing
+   "N/A" rather than crashing). */
+#define DISK_FRIGIDER_PATH "/run/media/alextria/frigider"
 
 static void draw_row(g15canvas *c, int y, const char *label, int pct,
                       const char *pct_str, const char *amount, int pct_y_nudge) {
@@ -464,7 +481,7 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
     } else if (strcmp(key, "DISK_FRIGIDER_PCT") == 0) {
-        double v = get_disk_percent("/run/media/alextria/frigider");
+        double v = get_disk_percent(DISK_FRIGIDER_PATH);
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
     } else if (strcmp(key, "UPTIME") == 0) {

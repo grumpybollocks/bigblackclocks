@@ -27,11 +27,17 @@ echo "=== 3/6: Compile the C programs ==="
 # was built with -- without them, g15canvas's struct layout mismatches
 # between this program and the library, corrupting stack memory (this
 # bit us once already while building v1.1; caught via AddressSanitizer).
-gcc $(pkg-config --cflags freetype2) src/g510_lcd_stats.c -o src/g510_lcd_stats -lg15render $(pkg-config --libs freetype2)
+# -DPROJECT_DIR bakes in THIS checkout's absolute path so the binary
+# can find its own font/config files without any file in the repo
+# itself hardcoding a username or machine-specific location.
+gcc $(pkg-config --cflags freetype2) -DPROJECT_DIR="\"$DIR\"" src/g510_lcd_stats.c -o src/g510_lcd_stats -lg15render $(pkg-config --libs freetype2)
 gcc src/g510_lcd_buttons.c -o src/g510_lcd_buttons
 
 echo "=== 4/6: udev rules + hwdb (needs sudo) ==="
-sudo cp udev/99-g510-lcd.rules /etc/udev/rules.d/99-g510-lcd.rules
+# The checked-in rule has a __PROJECT_DIR__ placeholder instead of a
+# real path (same reasoning as -DPROJECT_DIR above) -- substitute it
+# here rather than committing any one checkout's location.
+sed "s|__PROJECT_DIR__|$DIR|g" udev/99-g510-lcd.rules | sudo tee /etc/udev/rules.d/99-g510-lcd.rules > /dev/null
 sudo cp udev/91-g510-stop-to-playpause.hwdb /etc/udev/hwdb.d/91-g510-stop-to-playpause.hwdb
 sudo udevadm control --reload-rules
 sudo systemd-hwdb update
@@ -40,7 +46,9 @@ read -p "Press Enter once you've replugged the keyboard..."
 
 echo "=== 5/6: systemd --user services ==="
 mkdir -p ~/.config/systemd/user
-cp services/g510-lcd-stats.service services/g510-lcd-buttons.service services/g510-macro-daemon.service ~/.config/systemd/user/
+for svc in g510-lcd-stats g510-lcd-buttons g510-macro-daemon; do
+    sed "s|__PROJECT_DIR__|$DIR|g" "services/$svc.service" > ~/.config/systemd/user/"$svc.service"
+done
 systemctl --user daemon-reload
 systemctl --user enable --now ydotool.service
 systemctl --user enable --now g510-lcd-stats.service g510-lcd-buttons.service g510-macro-daemon.service
@@ -61,6 +69,6 @@ echo "  g15fontconvert -s 8 -i /path/to/Euro_Bold.otf -o fonts/lcd-label-8.fnt"
 echo ""
 echo "Also can't be scripted: Brave's 'Plasma Integration' extension"
 echo "media-control feature needs to be manually disabled if you use"
-echo "Brave + media keys together (see README.txt, MEDIA KEYS FIX #2)."
+echo "Brave + media keys together (see G510_README.md, MEDIA KEYS FIX #2)."
 echo ""
 systemctl --user status g510-lcd-stats.service g510-lcd-buttons.service g510-macro-daemon.service --no-pager -l | head -30
