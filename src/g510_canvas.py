@@ -186,6 +186,7 @@ class G510Canvas(QWidget):
         self._active_mkey = "M1"
         self._mr_active = False
         self._assigned = set()  # G-key names with a macro in the current profile
+        self.setMouseTracking(True)  # needed to get hover moves without a button held
         self._compute_size()
 
     def set_board_color(self, qcolor):
@@ -278,6 +279,17 @@ class G510Canvas(QWidget):
             painter.setPen(self._label_color(fill))
             painter.setFont(mkey_font if cell.kind == "mkey" else font)
             painter.drawText(rect, Qt.AlignCenter, cell.label)
+
+    def _is_clickable(self, cell):
+        return cell is not None and (cell.kind == "gkey" or cell.key_name in ("_M1", "_M2", "_M3"))
+
+    def mouseMoveEvent(self, event):
+        # Pointing-hand cursor over anything clickable -- the only hint
+        # this project gives that a cell does something, since nothing
+        # else on the canvas visually says "button" the way a QPushButton
+        # would have.
+        cell = self._cell_at(QPointF(event.pos()))
+        self.setCursor(Qt.PointingHandCursor if self._is_clickable(cell) else Qt.ArrowCursor)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:

@@ -418,6 +418,7 @@ class KeyboardTab(QWidget):
 
         root = QHBoxLayout()
 
+        canvas_col = QVBoxLayout()
         self.canvas = g510_canvas.G510Canvas()
         current_rgb = read_current_rgb()
         if current_rgb:
@@ -425,7 +426,13 @@ class KeyboardTab(QWidget):
         self.canvas.gkey_clicked.connect(self.open_key_dialog)
         self.canvas.mkey_clicked.connect(self.select_profile)
         self.refresh_assigned_keys()
-        root.addWidget(self.canvas, stretch=1)
+        canvas_col.addWidget(self.canvas)
+
+        hint = QLabel("Click a G-key to record a macro  •  click M1/M2/M3 to switch profiles  •  gold border = macro assigned")
+        hint.setObjectName("Status")
+        canvas_col.addWidget(hint)
+        canvas_col.addStretch()
+        root.addLayout(canvas_col, stretch=1)
 
         panel = QWidget()
         panel.setObjectName("Panel")
