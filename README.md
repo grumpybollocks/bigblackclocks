@@ -81,4 +81,7 @@ the key mappings wrong on this keyboard. Runs quietly as three systemd
 
 Want the full story — protocol details, every bug we hit and how it
 got fixed, the font conversion faff, the udev rules? That's all in
-[`G510_README.md`](G510_README.md).
+[`G510_README.md`](G510_README.md). Just want to know how to actually
+use the Custom Screens editor (add sensors, drag them around, resize
+bars)? [`G510_CUSTOM_SCREENS_HOWTO.md`](G510_CUSTOM_SCREENS_HOWTO.md)
+is the short version.
