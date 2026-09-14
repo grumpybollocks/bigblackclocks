@@ -283,11 +283,15 @@ static g15font *label_font = NULL;
 
 /* PROJECT_DIR is passed at compile time by install.sh/rebuild.sh
    (-DPROJECT_DIR='"'$DIR'"') so this file doesn't hardcode a username
-   or a specific checkout location. The fallback below only matters if
-   someone hand-compiles this outside those scripts -- edit it for
-   your own checkout in that case. */
+   or a specific checkout location. Both scripts always pass it, so
+   there's no real case where a fallback value is needed -- and a
+   fallback would have to be either someone's actual real path (which
+   defeats the whole point) or a made-up one that fails in a confusing
+   way at runtime. Failing loudly at COMPILE time instead: hand-compile
+   this file directly and you get a clear error telling you what to do,
+   not a silently-wrong path or a random "file not found" later. */
 #ifndef PROJECT_DIR
-#define PROJECT_DIR "/home/alextria/Desktop/System-Fixes/G510LCD"
+#error "PROJECT_DIR not defined -- compile via install.sh or scripts/rebuild.sh, or pass -DPROJECT_DIR='\"/your/checkout/path\"' yourself"
 #endif
 #define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
 #define CUSTOM_SCREENS_PATH PROJECT_DIR "/custom_screens.txt"
