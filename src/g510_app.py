@@ -22,9 +22,11 @@ from PyQt5.QtWidgets import (
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QColor
 import evdev
 from evdev import ecodes
+
+import g510_canvas
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent  # repo root (this file lives in src/)
 LED_DIR = Path("/sys/class/leds/g15::kbd_backlight")
@@ -35,6 +37,100 @@ STATS_BINARY = PROJECT_DIR / "src" / "g510_lcd_stats"
 CUSTOM_SCREENS_FILE = PROJECT_DIR / "custom_screens.txt"
 LCD_WIDTH = 160
 LCD_HEIGHT = 43
+
+# Shared dark theme, copied verbatim from the sibling G910 app's
+# g910_app.py for visual consistency across the two projects.
+STYLESHEET = """
+QWidget {
+    background-color: #17171a;
+    color: #e4e4e7;
+    font-family: sans-serif;
+}
+QTabWidget::pane {
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #1e1e22;
+    border: 1px solid #2a2a30;
+    padding: 8px 18px;
+    margin-right: 2px;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+}
+QTabBar::tab:selected {
+    background: #26262b;
+    border-bottom-color: #26262b;
+    color: white;
+}
+QPushButton {
+    background-color: #26262b;
+    border: 1px solid #34343a;
+    border-radius: 6px;
+    padding: 7px 10px;
+    text-align: left;
+}
+QPushButton:hover {
+    background-color: #302f36;
+    border-color: #46454e;
+}
+QPushButton:checked {
+    background-color: #3a6cc4;
+    border-color: #5a8ce0;
+    color: white;
+}
+QPushButton#Primary {
+    background-color: #3a6cc4;
+    border-color: #5a8ce0;
+    color: white;
+    text-align: center;
+    font-weight: 600;
+    padding: 9px 10px;
+}
+QPushButton#Primary:hover {
+    background-color: #4a7cd4;
+    border-color: #6a9cf0;
+}
+QLabel#Title {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 4px 2px 10px 2px;
+}
+QWidget#Panel {
+    background-color: #1c1c20;
+    border: 1px solid #2a2a30;
+    border-radius: 8px;
+}
+QFrame#Separator {
+    background-color: #2a2a30;
+    border: none;
+    max-width: 1px;
+    min-width: 1px;
+}
+QLabel#Status {
+    color: #9a9aa2;
+    font-size: 11px;
+    padding-top: 4px;
+}
+QSlider::groove:horizontal {
+    height: 4px;
+    background: #34343a;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: #5a8ce0;
+    width: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+QLineEdit {
+    background-color: #1e1e22;
+    border: 1px solid #34343a;
+    border-radius: 4px;
+    padding: 5px;
+}
+"""
 
 
 def active_profile_file():
@@ -132,77 +228,14 @@ def run_systemctl(action):
         return False, e.stderr or str(e)
 
 
-class BacklightTab(QWidget):
-    def __init__(self):
-        super().__init__()
-        layout = QVBoxLayout()
+MACRO_RECORD_LED = Path("/sys/class/leds/g15::macro_record/brightness")
 
-        layout.addWidget(QLabel("<b>Keyboard Backlight</b>"))
 
-        color_row = QHBoxLayout()
-        color_row.addWidget(QLabel("Color:"))
-        self.color_combo = QComboBox()
-        self.color_combo.addItems(COLOR_RGB.keys())
-        current_rgb = read_current_rgb()
-        for name, rgb in COLOR_RGB.items():
-            if rgb == current_rgb:
-                self.color_combo.setCurrentText(name)
-                break
-        color_row.addWidget(self.color_combo)
-        layout.addLayout(color_row)
-
-        bright_row = QHBoxLayout()
-        bright_row.addWidget(QLabel("Brightness:"))
-        self.bright_slider = QSlider(Qt.Horizontal)
-        self.bright_slider.setRange(0, 100)
-        self.bright_slider.setValue(read_current_brightness_pct())
-        self.bright_label = QLabel(f"{self.bright_slider.value()}%")
-        self.bright_slider.valueChanged.connect(
-            lambda v: self.bright_label.setText(f"{v}%")
-        )
-        bright_row.addWidget(self.bright_slider)
-        bright_row.addWidget(self.bright_label)
-        layout.addLayout(bright_row)
-
-        btn_row = QHBoxLayout()
-        apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self.on_apply)
-        set_default_btn = QPushButton("Set as Default")
-        set_default_btn.clicked.connect(self.on_set_as_default)
-        btn_row.addWidget(apply_btn)
-        btn_row.addWidget(set_default_btn)
-        layout.addLayout(btn_row)
-
-        layout.addWidget(QLabel("<b>Service Control</b> (LCD screen, buttons, macro daemon)"))
-        svc_row = QHBoxLayout()
-        start_btn = QPushButton("Start")
-        start_btn.clicked.connect(lambda: self.on_service_action("start"))
-        stop_btn = QPushButton("Stop")
-        stop_btn.clicked.connect(lambda: self.on_service_action("stop"))
-        restart_btn = QPushButton("Restart Service")
-        restart_btn.clicked.connect(lambda: self.on_service_action("restart"))
-        svc_row.addWidget(start_btn)
-        svc_row.addWidget(stop_btn)
-        svc_row.addWidget(restart_btn)
-        layout.addLayout(svc_row)
-
-        layout.addStretch()
-        self.setLayout(layout)
-
-    def on_apply(self):
-        ok, err = apply_backlight(self.color_combo.currentText(), self.bright_slider.value())
-        if not ok:
-            QMessageBox.critical(self, "Error", err)
-
-    def on_set_as_default(self):
-        ok, err = set_as_default(self.color_combo.currentText(), self.bright_slider.value())
-        if not ok:
-            QMessageBox.critical(self, "Error", err)
-
-    def on_service_action(self, action):
-        ok, err = run_systemctl(action)
-        if not ok:
-            QMessageBox.critical(self, "Error", err)
+def read_macro_record_led():
+    try:
+        return int(MACRO_RECORD_LED.read_text().strip()) > 0
+    except Exception:
+        return False
 
 
 def load_macros():
@@ -368,84 +401,135 @@ class MacroRecordDialog(QDialog):
         self.accept()
 
 
-class GKeysTab(QWidget):
-    """3 groups of 6 keys (2 rows x 3 columns each), stacked with spacing
-    -- mirrors the G510s's actual physical G-key layout. M1/M2/M3 buttons
-    above select which profile you're viewing/editing; a poll timer
-    keeps this in sync with the daemon's live profile too, so pressing
-    the physical M1/M2/M3 keys updates the GUI the same way."""
+class KeyboardTab(QWidget):
+    """Unified Backlight + G-Keys view: a real keyboard-shaped canvas
+    (see g510_canvas.py) next to a control panel, same overall pattern
+    as the sibling G910 app's canvas+sidebar layout -- adapted here for
+    a single-zone backlight (one live color for the whole board, not
+    per-key) and 18 G-keys instead of 9.
+
+    G-keys on the canvas open the existing macro-record dialog
+    unchanged; M1/M2/M3 switch the active profile unchanged; a poll
+    timer keeps the canvas's active-M-key highlight and MR indicator in
+    sync with the daemon/hardware, exactly like the old GKeysTab did."""
     def __init__(self):
         super().__init__()
         self.current_profile = "M1"
-        layout = QVBoxLayout()
 
-        layout.addWidget(QLabel("<b>G-Key Macros</b> (click a key to record/assign)"))
+        root = QHBoxLayout()
 
-        layout.addSpacing(10)
-        profile_row = QHBoxLayout()
-        profile_row.setSpacing(24)  # spaced out like a title, not crammed together
-        profile_row.addStretch()
-        self.profile_buttons = {}
-        for name in ("M1", "M2", "M3"):
-            btn = QPushButton(name)
-            btn.setCheckable(True)
-            btn.setStyleSheet(
-                "QPushButton { font-weight: bold; font-size: 14px; padding: 6px 14px; }"
-                "QPushButton:checked { background-color: #4a90d9; color: white; }"
-            )
-            btn.clicked.connect(lambda _, n=name: self.select_profile(n))
-            profile_row.addWidget(btn)
-            self.profile_buttons[name] = btn
-        profile_row.addStretch()
-        self.profile_buttons["M1"].setChecked(True)
-        layout.addLayout(profile_row)
-        layout.addSpacing(16)
+        self.canvas = g510_canvas.G510Canvas()
+        current_rgb = read_current_rgb()
+        if current_rgb:
+            self.canvas.set_board_color(QColor(*current_rgb))
+        self.canvas.gkey_clicked.connect(self.open_key_dialog)
+        self.canvas.mkey_clicked.connect(self.select_profile)
+        root.addWidget(self.canvas, stretch=1)
 
-        grid_container = QVBoxLayout()
-        grid_container.setSpacing(20)  # visible gap between the 3 groups
-        self.key_buttons = {}
-        key_num = 1
-        for group in range(3):
-            grid = QGridLayout()
-            grid.setVerticalSpacing(8)  # gap between the 2 rows within a group
-            grid.setHorizontalSpacing(6)
-            for row in range(2):
-                for col in range(3):
-                    name = f"G{key_num}"
-                    btn = QPushButton(name)
-                    btn.clicked.connect(lambda _, n=name: self.open_key_dialog(n))
-                    grid.addWidget(btn, row, col)
-                    self.key_buttons[name] = btn
-                    key_num += 1
-            grid_container.addLayout(grid)
-        layout.addLayout(grid_container)
+        panel = QWidget()
+        panel.setObjectName("Panel")
+        panel.setFixedWidth(220)
+        panel_layout = QVBoxLayout()
 
-        layout.addStretch()
-        self.setLayout(layout)
+        title = QLabel("Backlight")
+        title.setObjectName("Title")
+        panel_layout.addWidget(title)
 
-        # Physical M1/M2/M3 presses on the keyboard update the daemon's
-        # active profile, written to a status file -- poll it so the GUI
-        # follows along instead of only reacting to its own buttons.
-        self.profile_poll_timer = QTimer(self)
-        self.profile_poll_timer.timeout.connect(self.poll_active_profile)
-        self.profile_poll_timer.start(500)
+        panel_layout.addWidget(QLabel("Color:"))
+        self.color_combo = QComboBox()
+        self.color_combo.addItems(COLOR_RGB.keys())
+        for name, rgb in COLOR_RGB.items():
+            if rgb == current_rgb:
+                self.color_combo.setCurrentText(name)
+                break
+        panel_layout.addWidget(self.color_combo)
+
+        panel_layout.addWidget(QLabel("Brightness:"))
+        bright_row = QHBoxLayout()
+        self.bright_slider = QSlider(Qt.Horizontal)
+        self.bright_slider.setRange(0, 100)
+        self.bright_slider.setValue(read_current_brightness_pct())
+        self.bright_label = QLabel(f"{self.bright_slider.value()}%")
+        self.bright_slider.valueChanged.connect(
+            lambda v: self.bright_label.setText(f"{v}%")
+        )
+        bright_row.addWidget(self.bright_slider)
+        bright_row.addWidget(self.bright_label)
+        panel_layout.addLayout(bright_row)
+
+        apply_btn = QPushButton("Apply")
+        apply_btn.setObjectName("Primary")
+        apply_btn.clicked.connect(self.on_apply)
+        panel_layout.addWidget(apply_btn)
+        set_default_btn = QPushButton("Set as Default")
+        set_default_btn.clicked.connect(self.on_set_as_default)
+        panel_layout.addWidget(set_default_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setObjectName("Separator")
+        panel_layout.addSpacing(10)
+        panel_layout.addWidget(sep)
+        panel_layout.addSpacing(10)
+
+        panel_layout.addWidget(QLabel("Service Control"))
+        start_btn = QPushButton("Start")
+        start_btn.clicked.connect(lambda: self.on_service_action("start"))
+        panel_layout.addWidget(start_btn)
+        stop_btn = QPushButton("Stop")
+        stop_btn.clicked.connect(lambda: self.on_service_action("stop"))
+        panel_layout.addWidget(stop_btn)
+        restart_btn = QPushButton("Restart Service")
+        restart_btn.clicked.connect(lambda: self.on_service_action("restart"))
+        panel_layout.addWidget(restart_btn)
+
+        panel_layout.addStretch()
+        panel.setLayout(panel_layout)
+        root.addWidget(panel)
+
+        self.setLayout(root)
+
+        # Physical M1/M2/M3 presses and the MR LED are hardware/daemon
+        # state this GUI doesn't own -- poll and reflect them, same
+        # pattern as the old GKeysTab's profile poll timer.
+        self.poll_timer = QTimer(self)
+        self.poll_timer.timeout.connect(self.poll_hardware_state)
+        self.poll_timer.start(500)
 
     def select_profile(self, name):
         self.current_profile = name
-        for n, btn in self.profile_buttons.items():
-            btn.setChecked(n == name)
+        self.canvas.set_active_mkey(name)
 
-    def poll_active_profile(self):
+    def poll_hardware_state(self):
         try:
             live = active_profile_file().read_text().strip()
         except Exception:
-            return
-        if live in self.profile_buttons and live != self.current_profile:
+            live = None
+        if live in ("M1", "M2", "M3") and live != self.current_profile:
             self.select_profile(live)
+        self.canvas.set_mr_active(read_macro_record_led())
 
     def open_key_dialog(self, gkey):
         dlg = MacroRecordDialog(self.current_profile, gkey, self)
         dlg.exec_()
+
+    def on_apply(self):
+        ok, err = apply_backlight(self.color_combo.currentText(), self.bright_slider.value())
+        if not ok:
+            QMessageBox.critical(self, "Error", err)
+            return
+        rgb = COLOR_RGB[self.color_combo.currentText()]
+        self.canvas.set_board_color(QColor(*rgb))
+
+    def on_set_as_default(self):
+        ok, err = set_as_default(self.color_combo.currentText(), self.bright_slider.value())
+        if not ok:
+            QMessageBox.critical(self, "Error", err)
+
+    def on_service_action(self, action):
+        ok, err = run_systemctl(action)
+        if not ok:
+            QMessageBox.critical(self, "Error", err)
 
 
 # --- Custom Screens (v1.1): dashboards for L2-L5, mirrors the sensor
@@ -758,13 +842,17 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("G510 LCD Control")
-        self.resize(720, 640)
+        self.setStyleSheet(STYLESHEET)
 
         tabs = QTabWidget()
-        tabs.addTab(BacklightTab(), "Backlight")
-        tabs.addTab(GKeysTab(), "G-Keys")
-        tabs.addTab(CustomScreensTab(), "Custom Screens")
+        tabs.addTab(KeyboardTab(), "Backlight + G-Keys")
+        tabs.addTab(CustomScreensTab(), "Custom Screens (WIP)")
         self.setCentralWidget(tabs)
+
+        # A hardcoded resize() goes stale the moment tab content's
+        # natural size differs (bit us on the sibling G910 app) --
+        # adjustSize() sizes the window to what's actually in it.
+        self.adjustSize()
 
 
 if __name__ == "__main__":

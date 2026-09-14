@@ -29,7 +29,7 @@ replugs, and kernel updates. Does what it says on the tin.
 
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
-| **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons (AIDA64 style), does the RGB backlight, and handles G-key macros across M1-M3 profiles. Tagged `v1.0`, still gets looked after. |
+| **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons (AIDA64 style), does the RGB backlight through a proper on-screen render of the keyboard (click a G-key to record a macro, M1/M2/M3/MR are real clickable bits of the picture), and handles G-key macros across M1-M3 profiles. Tagged `v1.0`; the canvas rework is built and self-tested but not yet confirmed by the user on the real keyboard. |
 | **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. Handles G-key macros, saving/loading whole lighting setups, and won't get confused after a reboot (device paths are pinned down properly, not left to chance). Comes with its own installer and a desktop shortcut. Hit its `g910-gui-v1` milestone and still being fussed over — hasn't made its way to `main` yet. |
 
 ### Screenshots
@@ -42,7 +42,15 @@ your saved lighting Profiles on the right.
 
 ![G910 Control app — v1](docs/screenshots/g910-control-v1.png)
 
-*(G510s screenshot on the way — watch this space.)*
+**G510s Control** — the same idea, adapted to what this keyboard can
+actually do: one sysfs LED for the whole board instead of per-key RGB,
+so the keyboard render shows the real live backlight colour across the
+main board, G-keys in their own accent colour (click one to record a
+macro), and M1/M2/M3/MR shown above the G-key columns. Built and
+self-tested 2026-09-14; not yet confirmed on the real hardware by the
+user.
+
+![G510s Control app — v1](docs/screenshots/g510s-control-v1.png)
 
 A couple of other branches knocking about: `legacy-yad-backlight-script`
 keeps the original yad/bash backlight script around for old times'
