@@ -30,7 +30,7 @@ replugs, and kernel updates. Does what it says on the tin.
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
 | **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons (AIDA64 style), does the RGB backlight through a proper on-screen render of the keyboard (click a G-key to record a macro, M1/M2/M3/MR are real clickable bits of the picture), and handles G-key macros across M1-M3 profiles. Tagged `v1.0`; the canvas rework is built and self-tested but not yet confirmed by the user on the real keyboard. |
-| **G910 Orion Spectrum** | [`g910-canvas`](../../tree/g910-canvas) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. Handles G-key macros, saving/loading whole lighting setups, and won't get confused after a reboot (device paths are pinned down properly, not left to chance). Comes with its own installer and a desktop shortcut. Tagged `g910-v1.0` after a full bug-check pass — hasn't made its way to `main` yet, still on its own branch. |
+| **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. Handles G-key macros, saving/loading whole lighting setups, and won't get confused after a reboot (device paths are pinned down properly, not left to chance). Comes with its own installer and a desktop shortcut. Tagged `g910-v1.0` after a full bug-check pass, merged into `main` 2026-09-14 — further G910 work now happens on the `g910` branch. |
 
 ### Screenshots
 
@@ -52,18 +52,21 @@ user.
 
 ![G510s Control app — v1](docs/screenshots/g510s-control-v1.png)
 
-A couple of other branches knocking about: `legacy-yad-backlight-script`
-keeps the original yad/bash backlight script around for old times'
-sake (the G510s app's Backlight tab does the job properly now), and
-`g910` is what the G910 app looked like before the canvas rewrite —
-left as-is for the history.
+Active development for each keyboard now happens on its own branch
+(`g510s` for the G510s app, `g910` for the G910 app) and gets merged
+back into `main` once a feature is actually done — see
+[`BRANCHES.md`](BRANCHES.md) for the full map of every branch and tag
+in this repo, including the frozen historical ones like
+`legacy-yad-backlight-script` (the original yad/bash backlight script,
+kept for old times' sake — the G510s app's Backlight tab does the job
+properly now) and `g910-canvas` (the full G910 development history).
 
 Want to actually run the G510s app? `./install.sh` sorts out every
 dependency, drops the system files where they need to go, builds
 everything, and switches the services on — the one thing it can't do
 for you is track down your own copy of the Eurostile Bold font (that's
 a licensing thing, not a laziness thing). The G910 app's got its own
-installer, `install-g910.sh`, over on the `g910-canvas` branch.
+installer, `install-g910.sh`, right here on `main`.
 
 ---
 
