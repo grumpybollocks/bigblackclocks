@@ -88,3 +88,7 @@ got fixed, the font conversion faff, the udev rules? That's all in
 use the Custom Screens editor (add sensors, drag them around, resize
 bars)? [`G510_CUSTOM_SCREENS_HOWTO.md`](G510_CUSTOM_SCREENS_HOWTO.md)
 is the short version.
+
+Wondering whether this actually works for anyone other than us, not
+just on our own machines? [`READY_FOR_ANYONE.md`](READY_FOR_ANYONE.md)
+covers that directly.

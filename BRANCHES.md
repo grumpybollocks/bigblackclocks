@@ -4,6 +4,10 @@ This repo holds two independent apps for two different Logitech keyboards.
 Keeping this file up to date is the whole point of it -- if a branch's
 purpose changes, update its entry here in the same commit.
 
+See [`READY_FOR_ANYONE.md`](READY_FOR_ANYONE.md) for what makes both
+apps actually installable by someone other than us -- what's already
+solid, what's still a known gap.
+
 ## Two machines, two keyboards
 
 This repo is worked on from two machines, each with only one of the two
