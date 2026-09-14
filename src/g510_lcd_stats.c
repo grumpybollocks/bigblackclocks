@@ -496,6 +496,7 @@ typedef struct {
     char sensor[24];
     char style[8]; /* "number" or "bar" */
     int x, y;
+    int width; /* bar length in px, only meaningful for style="bar" -- ignored for "number" */
 } element_t;
 
 typedef struct {
@@ -525,6 +526,8 @@ static void load_custom_screens(void) {
             if (cs->count >= MAX_ELEMENTS) continue;
             element_t *el = &cs->elements[cs->count];
             el->sensor[0] = 0; el->style[0] = 0; el->x = 0; el->y = 0;
+            el->width = 40; /* matches the previous hardcoded bar length -- old
+                                config lines with no width= keep looking identical */
             char rest[256];
             strncpy(rest, line + 8, sizeof(rest) - 1);
             rest[sizeof(rest) - 1] = 0;
@@ -536,6 +539,7 @@ static void load_custom_screens(void) {
                     else if (strcmp(key, "style") == 0) strncpy(el->style, val, sizeof(el->style) - 1);
                     else if (strcmp(key, "x") == 0) el->x = atoi(val);
                     else if (strcmp(key, "y") == 0) el->y = atoi(val);
+                    else if (strcmp(key, "width") == 0) el->width = atoi(val);
                 }
                 tok = strtok(NULL, " ");
             }
@@ -562,7 +566,7 @@ static void draw_element(g15canvas *c, element_t *el) {
        falls back to number style rather than inventing a scale. */
     if (strcmp(el->style, "bar") == 0 && (def->is_percent || def->is_temp) && pct_for_bar >= 0) {
         int bar_x1 = value_x;
-        int bar_x2 = bar_x1 + 40;
+        int bar_x2 = bar_x1 + el->width;
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
         g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, bar_x2 + 4, el->y);
     } else {

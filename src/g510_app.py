@@ -19,7 +19,7 @@ from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QGridLayout, QComboBox, QSlider, QPushButton, QLabel,
-    QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame,
+    QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame, QScrollArea,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen
@@ -612,7 +612,7 @@ CUSTOM_SCREEN_KEYS = ["L2", "L3", "L4", "L5"]
 
 
 def load_custom_screens():
-    """Returns {"L2": [ {sensor,style,x,y}, ... ], "L3": [...], ...}"""
+    """Returns {"L2": [ {sensor,style,x,y,width}, ... ], "L3": [...], ...}"""
     config = {k: [] for k in CUSTOM_SCREEN_KEYS}
     if not CUSTOM_SCREENS_FILE.exists():
         return config
@@ -623,12 +623,12 @@ def load_custom_screens():
             key = line.split(" ", 1)[1]
             current = key if key in config else None
         elif line.startswith("ELEMENT ") and current:
-            el = {"sensor": "", "style": "number", "x": 0, "y": 0}
+            el = {"sensor": "", "style": "number", "x": 0, "y": 0, "width": 40}
             for tok in line[len("ELEMENT "):].split():
                 if "=" not in tok:
                     continue
                 k, v = tok.split("=", 1)
-                if k in ("x", "y"):
+                if k in ("x", "y", "width"):
                     try:
                         el[k] = int(v)
                     except ValueError:
@@ -645,7 +645,11 @@ def save_custom_screens(config):
     for key in CUSTOM_SCREEN_KEYS:
         lines.append(f"SCREEN {key}")
         for el in config[key]:
-            lines.append(f"ELEMENT sensor={el['sensor']} style={el['style']} x={el['x']} y={el['y']}")
+            width = el.get("width", 40)
+            lines.append(
+                f"ELEMENT sensor={el['sensor']} style={el['style']} "
+                f"x={el['x']} y={el['y']} width={width}"
+            )
     CUSTOM_SCREENS_FILE.write_text("\n".join(lines) + "\n")
 
 
@@ -705,15 +709,19 @@ PREVIEW_SCALE = 4
 # 8-element-max, 160x43 screen.
 ELEMENT_HIT_W = 50
 ELEMENT_HIT_H = 10
+RESIZE_HANDLE_PX = 5   # half-size of the little resize square, in LCD px
+MIN_BAR_WIDTH = 10
+MAX_BAR_WIDTH = 140
 
 
 class ScreenPreviewCanvas(QWidget):
     """The live LCD preview, but interactive: click and drag an element
-    to move it, with the preview re-rendering (throttled) as you drag
-    so you can see exactly where it'll land -- same underlying
-    --preview mechanism as before, just wired to mouse events instead
-    of typed X/Y numbers."""
-    element_moved = pyqtSignal(int, int, int)  # index, new_x, new_y (LCD-space)
+    to move it, or drag its resize handle (bar elements only) to change
+    the bar's length -- both re-render the preview (throttled) as you
+    go, same underlying --preview mechanism as before, just wired to
+    mouse events instead of typed X/Y/width numbers."""
+    element_moved = pyqtSignal(int, int, int)   # index, new_x, new_y (LCD-space)
+    element_resized = pyqtSignal(int, int)        # index, new_width (LCD-space)
     drag_started = pyqtSignal()
     drag_finished = pyqtSignal()
 
@@ -723,6 +731,9 @@ class ScreenPreviewCanvas(QWidget):
         self._elements = []
         self._drag_index = None
         self._drag_offset = QPoint(0, 0)
+        self._resize_index = None
+        self._resize_start_x = 0
+        self._resize_start_width = 0
         self.setFixedSize(LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE)
         self.setMouseTracking(True)
         self.setCursor(Qt.ArrowCursor)
@@ -738,6 +749,17 @@ class ScreenPreviewCanvas(QWidget):
             ELEMENT_HIT_W * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE,
         )
 
+    def _resize_handle_rect(self, el):
+        # Anchored to the right edge of the same approximate hit box
+        # used for dragging -- not pixel-aligned with the real rendered
+        # bar end (Python doesn't know the exact label width the C
+        # renderer computes), but consistent and easy to grab; the live
+        # preview during drag shows the actual real effect.
+        hx = el["x"] * PREVIEW_SCALE + ELEMENT_HIT_W * PREVIEW_SCALE
+        hy = el["y"] * PREVIEW_SCALE + (ELEMENT_HIT_H * PREVIEW_SCALE) // 2
+        r = RESIZE_HANDLE_PX * PREVIEW_SCALE
+        return QRect(hx - r, hy - r, r * 2, r * 2)
+
     def _element_at(self, pos):
         # Last element in the list is drawn/added most recently -- check
         # in reverse so an overlapping newer element wins, matching what
@@ -747,17 +769,38 @@ class ScreenPreviewCanvas(QWidget):
                 return i
         return None
 
+    def _resize_handle_at(self, pos):
+        for i in range(len(self._elements) - 1, -1, -1):
+            el = self._elements[i]
+            if el.get("style") == "bar" and self._resize_handle_rect(el).contains(pos):
+                return i
+        return None
+
     def paintEvent(self, event):
         painter = QPainter(self)
         if self._pixmap is not None:
             painter.drawPixmap(0, 0, self._pixmap)
-        if self._drag_index is not None:
+        for el in self._elements:
+            if el.get("style") == "bar":
+                painter.setPen(QPen(QColor(120, 120, 120), 1))
+                painter.setBrush(QColor(70, 140, 230, 180))
+                painter.drawRect(self._resize_handle_rect(el))
+        active = self._drag_index if self._drag_index is not None else self._resize_index
+        if active is not None:
             painter.setPen(QPen(QColor(70, 140, 230), 2, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._element_rect(self._elements[self._drag_index]))
+            painter.drawRect(self._element_rect(self._elements[active]))
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
+            return
+        r_idx = self._resize_handle_at(event.pos())
+        if r_idx is not None:
+            self._resize_index = r_idx
+            self._resize_start_x = event.pos().x()
+            self._resize_start_width = self._elements[r_idx].get("width", 40)
+            self.update()
+            self.drag_started.emit()
             return
         idx = self._element_at(event.pos())
         if idx is None:
@@ -770,9 +813,26 @@ class ScreenPreviewCanvas(QWidget):
         self.drag_started.emit()
 
     def mouseMoveEvent(self, event):
+        if self._resize_index is not None:
+            self.setCursor(Qt.SizeHorCursor)
+            delta = round((event.pos().x() - self._resize_start_x) / PREVIEW_SCALE)
+            new_width = max(MIN_BAR_WIDTH, min(MAX_BAR_WIDTH, self._resize_start_width + delta))
+            el = self._elements[self._resize_index]
+            if el.get("width", 40) != new_width:
+                el["width"] = new_width
+                self.element_resized.emit(self._resize_index, new_width)
+            self.update()
+            return
+
         if self._drag_index is None:
             idx = self._element_at(event.pos())
-            self.setCursor(Qt.OpenHandCursor if idx is not None else Qt.ArrowCursor)
+            over_handle = self._resize_handle_at(event.pos()) is not None
+            if over_handle:
+                self.setCursor(Qt.SizeHorCursor)
+            elif idx is not None:
+                self.setCursor(Qt.OpenHandCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
             return
         self.setCursor(Qt.ClosedHandCursor)
         new_pos = event.pos() - self._drag_offset
@@ -785,7 +845,15 @@ class ScreenPreviewCanvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() != Qt.LeftButton or self._drag_index is None:
+        if event.button() != Qt.LeftButton:
+            return
+        if self._resize_index is not None:
+            self._resize_index = None
+            self.setCursor(Qt.ArrowCursor)
+            self.update()
+            self.drag_finished.emit()
+            return
+        if self._drag_index is None:
             return
         self._drag_index = None
         self.setCursor(Qt.ArrowCursor)
@@ -804,18 +872,19 @@ class CustomScreensTab(QWidget):
         self.current_screen = "L2"
         self.config = load_custom_screens()
 
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("<b>Custom Screens</b> (L2-L5 buttons)"))
+        root = QHBoxLayout()
+
+        canvas_col = QVBoxLayout()
+        canvas_col.setSpacing(6)
 
         screen_row = QHBoxLayout()
-        screen_row.setSpacing(24)
-        screen_row.addStretch()
+        screen_row.setSpacing(8)
         self.screen_buttons = {}
         for key in CUSTOM_SCREEN_KEYS:
             btn = QPushButton(key)
             btn.setCheckable(True)
             btn.setStyleSheet(
-                "QPushButton { font-weight: bold; font-size: 14px; padding: 6px 14px; }"
+                "QPushButton { font-weight: bold; padding: 4px 12px; text-align: center; }"
                 "QPushButton:checked { background-color: #4a90d9; color: white; }"
             )
             btn.clicked.connect(lambda _, k=key: self.select_screen(k))
@@ -823,59 +892,92 @@ class CustomScreensTab(QWidget):
             self.screen_buttons[key] = btn
         screen_row.addStretch()
         self.screen_buttons["L2"].setChecked(True)
-        layout.addLayout(screen_row)
+        canvas_col.addLayout(screen_row)
 
         # Live, interactive preview -- scaled up 4x (160x43 -> 640x172)
         # so it's actually readable, tinted to match the real
         # green-on-black LCD. Elements are click-and-drag movable
-        # directly on this, not typed as X/Y numbers.
+        # directly on this; bar elements also get a small drag handle
+        # to resize their length.
         self.preview_canvas = ScreenPreviewCanvas()
         self.preview_canvas.element_moved.connect(self.on_element_dragged)
+        self.preview_canvas.element_resized.connect(self.on_element_resized)
+        self.preview_canvas.drag_started.connect(self.on_drag_started)
         self.preview_canvas.drag_finished.connect(self.on_drag_finished)
-        preview_row = QHBoxLayout()
-        preview_row.addStretch()
-        preview_row.addWidget(self.preview_canvas)
-        preview_row.addStretch()
-        layout.addLayout(preview_row)
+        canvas_col.addWidget(self.preview_canvas)
 
-        drag_hint = QLabel("Click and drag an element on the preview above to move it.")
+        drag_hint = QLabel("Drag an element to move it. Drag a bar's handle (right edge) to resize it.")
         drag_hint.setObjectName("Status")
-        drag_hint.setAlignment(Qt.AlignCenter)
-        layout.addWidget(drag_hint)
+        canvas_col.addWidget(drag_hint)
+        canvas_col.addStretch()
+        root.addLayout(canvas_col, stretch=1)
 
-        layout.addWidget(self._hline())
+        panel = QWidget()
+        panel.setObjectName("Panel")
+        panel.setFixedWidth(230)
+        panel_layout = QVBoxLayout()
 
-        layout.addWidget(QLabel("<b>Add Element</b>"))
-        form_row = QHBoxLayout()
+        title = QLabel("Custom Screens")
+        title.setObjectName("Title")
+        panel_layout.addWidget(title)
+
+        panel_layout.addWidget(QLabel("Add Element:"))
         self.sensor_combo = QComboBox()
         for key, label in SENSOR_CHOICES:
             self.sensor_combo.addItem(label, key)
         self.sensor_combo.currentIndexChanged.connect(self.on_sensor_changed)
-        form_row.addWidget(self.sensor_combo)
+        panel_layout.addWidget(self.sensor_combo)
 
         self.style_combo = QComboBox()
         self.style_combo.addItem("Number", "number")
         self.style_combo.addItem("Bar", "bar")
-        form_row.addWidget(self.style_combo)
-
-        add_btn = QPushButton("Add")
-        add_btn.clicked.connect(self.on_add_element)
-        form_row.addWidget(add_btn)
-        layout.addLayout(form_row)
+        panel_layout.addWidget(self.style_combo)
 
         self.bar_hint_label = QLabel(
-            "Bar isn't available for this sensor (no honest 0-100 scale) -- it'll show as a number."
+            "No honest 0-100 scale for this sensor -- shows as a number."
         )
-        self.bar_hint_label.setStyleSheet("color: #888; font-style: italic;")
+        self.bar_hint_label.setObjectName("Status")
+        self.bar_hint_label.setWordWrap(True)
         self.bar_hint_label.hide()
-        layout.addWidget(self.bar_hint_label)
+        panel_layout.addWidget(self.bar_hint_label)
 
-        layout.addWidget(QLabel("<b>Elements on this screen</b>"))
+        add_btn = QPushButton("Add")
+        add_btn.setObjectName("Primary")
+        add_btn.clicked.connect(self.on_add_element)
+        panel_layout.addWidget(add_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setObjectName("Separator")
+        panel_layout.addSpacing(6)
+        panel_layout.addWidget(sep)
+        panel_layout.addSpacing(6)
+
+        panel_layout.addWidget(QLabel("Elements on this screen:"))
+        # Fixed-height scroll area -- previously a long unbounded list
+        # of elements would push the whole layout down past the
+        # preview as you added more (reported directly: "if i add too
+        # many items they just fall under the preview screen"). This
+        # caps it so the window shape never depends on element count.
+        elements_scroll = QScrollArea()
+        elements_scroll.setWidgetResizable(True)
+        elements_scroll.setFixedHeight(180)
+        elements_scroll.setFrameShape(QFrame.NoFrame)
+        elements_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        elements_container = QWidget()
         self.elements_layout = QVBoxLayout()
-        layout.addLayout(self.elements_layout)
+        self.elements_layout.setSpacing(2)
+        self.elements_layout.setContentsMargins(0, 0, 0, 0)
+        self.elements_layout.addStretch()
+        elements_container.setLayout(self.elements_layout)
+        elements_scroll.setWidget(elements_container)
+        panel_layout.addWidget(elements_scroll)
 
-        layout.addStretch()
-        self.setLayout(layout)
+        panel_layout.addStretch()
+        panel.setLayout(panel_layout)
+        root.addWidget(panel)
+
+        self.setLayout(root)
 
         self.on_sensor_changed()
         self.refresh_elements_list()
@@ -893,13 +995,6 @@ class CustomScreensTab(QWidget):
         # of waiting up to a second for the next idle tick.
         self.drag_refresh_timer = QTimer(self)
         self.drag_refresh_timer.timeout.connect(self.refresh_preview)
-        self.preview_canvas.drag_started.connect(self.on_drag_started)
-
-    def _hline(self):
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        return line
 
     def select_screen(self, key):
         self.current_screen = key
@@ -932,6 +1027,7 @@ class CustomScreensTab(QWidget):
             "style": self.style_combo.currentData(),
             "x": 6,
             "y": default_y,
+            "width": 40,
         })
         save_custom_screens(self.config)
         self.refresh_elements_list()
@@ -952,6 +1048,11 @@ class CustomScreensTab(QWidget):
         # the (x, y) text in the element list live and cheap.
         self.refresh_elements_list()
 
+    def on_element_resized(self, index, width):
+        # Same idea as on_element_dragged, separate handler because the
+        # signal shape is different (index, width) vs (index, x, y).
+        self.refresh_elements_list()
+
     def on_drag_started(self):
         self.drag_refresh_timer.start(120)
 
@@ -961,6 +1062,9 @@ class CustomScreensTab(QWidget):
         self.refresh_preview()  # one final, accurate, untimed refresh
 
     def refresh_elements_list(self):
+        # Clear everything including the trailing stretch, then rebuild
+        # it fresh each time -- simplest way to keep the stretch at the
+        # end regardless of how many rows there are now.
         while self.elements_layout.count():
             item = self.elements_layout.takeAt(0)
             if item.widget():
@@ -969,18 +1073,30 @@ class CustomScreensTab(QWidget):
         elements = self.config[self.current_screen]
         if not elements:
             self.elements_layout.addWidget(QLabel("Nothing on this screen yet."))
+            self.elements_layout.addStretch()
             return
         for i, el in enumerate(elements):
             row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
             label = SENSOR_LABELS.get(el["sensor"], el["sensor"])
-            row.addWidget(QLabel(f"{label} - {el['style']} @ ({el['x']}, {el['y']})"))
+            # Position/width shown on the canvas itself now (drag to
+            # move, drag the handle to resize) -- repeating exact
+            # coordinates here just made rows overflow the narrow panel
+            # and need a horizontal scrollbar, so this stays short.
+            text = QLabel(f"{label} – {el['style']}")
+            text.setStyleSheet("font-size: 11px;")
+            text.setToolTip(f"x={el['x']} y={el['y']}" + (f" width={el.get('width', 40)}" if el.get("style") == "bar" else ""))
+            row.addWidget(text)
             row.addStretch()
-            remove_btn = QPushButton("Remove")
+            remove_btn = QPushButton("✕")
+            remove_btn.setFixedWidth(24)
+            remove_btn.setStyleSheet("padding: 1px;")
             remove_btn.clicked.connect(lambda _, idx=i: self.on_remove_element(idx))
             row.addWidget(remove_btn)
             container = QWidget()
             container.setLayout(row)
             self.elements_layout.addWidget(container)
+        self.elements_layout.addStretch()
 
     def refresh_preview(self):
         pixmap, err = render_preview(self.screen_number())

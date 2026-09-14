@@ -1,5 +1,8 @@
 SCREEN L2
-ELEMENT sensor=CPU_PCT style=number x=6 y=3
+ELEMENT sensor=CPU_PCT style=number x=2 y=6 width=40
+ELEMENT sensor=CPU_PCT style=bar x=43 y=8 width=43
+ELEMENT sensor=VRAM_PCT style=bar x=0 y=25 width=58
+ELEMENT sensor=GPU_VRAM_TEMP style=bar x=9 y=40 width=51
 SCREEN L3
 SCREEN L4
 SCREEN L5
