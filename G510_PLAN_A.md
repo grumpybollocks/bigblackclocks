@@ -121,6 +121,19 @@ regression), confirmed the app still launches cleanly via the quoted
 command. `READY_FOR_ANYONE.md`'s G510s section updated to match G910's
 "done and verified this pass" wording, same file, same branch.
 
+**Also found and fixed the same night, outside this phase's original
+scope**: a fresh full-repo grep (every tracked file, not just recent
+diffs) for the user's username/hostname/home path turned up one
+remaining hit missed by earlier cleanup passes — `DISK_FRIGIDER_PATH`
+in `g510_lcd_stats.c`, previously a compile-time constant with the
+username baked in. Fixed to build the path from `$USER` at runtime
+instead (same pattern `button_log_path()` already used in
+`g510_lcd_buttons.c`). Verified: clean compile, `--preview` still
+renders, full regression suite green, production binary rebuilt and
+service restarted live, and the repo-wide sweep now returns zero
+matches for username/hostname/home-path strings across every tracked
+file.
+
 ## Phase 3 — Merge to `main`
 
 Once Phases 0-2 are complete and confirmed: merge `g510s-dev` into
