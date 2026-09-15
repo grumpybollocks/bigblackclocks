@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QComboBox, QSlider, QPushButton, QLabel,
+    QHBoxLayout, QGridLayout, QComboBox, QPushButton, QLabel,
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame, QScrollArea,
     QFileDialog,
 )
@@ -159,16 +159,18 @@ QLabel#Status {
     font-size: 11px;
     padding-top: 4px;
 }
-QSlider::groove:horizontal {
-    height: 4px;
-    background: #34343a;
-    border-radius: 2px;
+QPushButton#Discreet {
+    background-color: transparent;
+    border: 1px solid #2a2a30;
+    color: #8a8a92;
+    font-size: 11px;
+    padding: 4px 6px;
+    text-align: center;
 }
-QSlider::handle:horizontal {
-    background: #5a8ce0;
-    width: 14px;
-    margin: -6px 0;
-    border-radius: 7px;
+QPushButton#Discreet:hover {
+    background-color: #26262b;
+    color: #c0c0c6;
+    border-color: #3a3a42;
 }
 QLineEdit {
     background-color: #1e1e22;
@@ -205,14 +207,6 @@ def read_current_rgb():
         return None
 
 
-def read_current_brightness_pct():
-    try:
-        val = int((LED_DIR / "brightness").read_text().strip())
-        return round(val * 100 / 255)
-    except Exception:
-        return 100
-
-
 def write_defaults_script(rgb, brightness_val):
     script = f"""#!/bin/bash
 # Applies the chosen keyboard backlight color. Run automatically by
@@ -235,25 +229,35 @@ echo "{rgb[0]} {rgb[1]} {rgb[2]}" > /sys/class/leds/g15::kbd_backlight/multi_int
     DEFAULTS_SCRIPT_DATA_DIR.chmod(0o755)
 
 
-def apply_backlight(color_name, brightness_pct):
+
+# Brightness used to be user-adjustable here, but real testing (writing
+# 50/128/200/100 to the sysfs brightness file and reading each back
+# immediately) confirmed it's pinned at max_brightness (255) regardless
+# of what's written -- a real kernel/driver-level limitation on this
+# hardware, not a display bug. Removed rather than kept as dead,
+# misleading UI; MAX_BRIGHTNESS documents why 255 is hardcoded below,
+# not guessed.
+MAX_BRIGHTNESS = 255
+
+
+def apply_backlight(color_name):
     """Writes the LED sysfs files AND rewrites set-backlight-color.sh so
     this becomes the new permanent boot default (matches the behavior
     already established by g510-backlight-apply.sh -- same contract)."""
     rgb = COLOR_RGB.get(color_name)
     if rgb is None:
         return False, f"Unknown color: {color_name}"
-    brightness_val = round(brightness_pct * 255 / 100)
     try:
         (LED_DIR / "multi_intensity").write_text(f"{rgb[0]} {rgb[1]} {rgb[2]}")
-        (LED_DIR / "brightness").write_text(str(brightness_val))
+        (LED_DIR / "brightness").write_text(str(MAX_BRIGHTNESS))
     except PermissionError as e:
         return False, f"Permission denied writing to {LED_DIR} -- check the udev rule (99-g510-lcd.rules) is installed: {e}"
 
-    write_defaults_script(rgb, brightness_val)
+    write_defaults_script(rgb, MAX_BRIGHTNESS)
     return True, None
 
 
-def set_as_default(color_name, brightness_pct):
+def set_as_default(color_name):
     """Persist-only: updates set-backlight-color.sh (the boot default)
     WITHOUT touching the live backlight right now -- distinct from
     Apply, which does both. Lets you keep previewing other colors live
@@ -261,8 +265,7 @@ def set_as_default(color_name, brightness_pct):
     rgb = COLOR_RGB.get(color_name)
     if rgb is None:
         return False, f"Unknown color: {color_name}"
-    brightness_val = round(brightness_pct * 255 / 100)
-    write_defaults_script(rgb, brightness_val)
+    write_defaults_script(rgb, MAX_BRIGHTNESS)
     return True, None
 
 
@@ -508,19 +511,6 @@ class KeyboardTab(QWidget):
                 break
         panel_layout.addWidget(self.color_combo)
 
-        panel_layout.addWidget(QLabel("Brightness:"))
-        bright_row = QHBoxLayout()
-        self.bright_slider = QSlider(Qt.Horizontal)
-        self.bright_slider.setRange(0, 100)
-        self.bright_slider.setValue(read_current_brightness_pct())
-        self.bright_label = QLabel(f"{self.bright_slider.value()}%")
-        self.bright_slider.valueChanged.connect(
-            lambda v: self.bright_label.setText(f"{v}%")
-        )
-        bright_row.addWidget(self.bright_slider)
-        bright_row.addWidget(self.bright_label)
-        panel_layout.addLayout(bright_row)
-
         apply_btn = QPushButton("Apply")
         apply_btn.setObjectName("Primary")
         apply_btn.clicked.connect(self.on_apply)
@@ -536,16 +526,17 @@ class KeyboardTab(QWidget):
         panel_layout.addWidget(sep)
         panel_layout.addSpacing(10)
 
-        panel_layout.addWidget(QLabel("Service Control"))
-        start_btn = QPushButton("Start")
-        start_btn.clicked.connect(lambda: self.on_service_action("start"))
-        panel_layout.addWidget(start_btn)
-        stop_btn = QPushButton("Stop")
-        stop_btn.clicked.connect(lambda: self.on_service_action("stop"))
-        panel_layout.addWidget(stop_btn)
-        restart_btn = QPushButton("Restart Service")
-        restart_btn.clicked.connect(lambda: self.on_service_action("restart"))
-        panel_layout.addWidget(restart_btn)
+        service_label = QLabel("Service Control")
+        service_label.setObjectName("Status")
+        panel_layout.addWidget(service_label)
+        service_row = QHBoxLayout()
+        service_row.setSpacing(4)
+        for label, action in (("Start", "start"), ("Stop", "stop"), ("Restart", "restart")):
+            btn = QPushButton(label)
+            btn.setObjectName("Discreet")
+            btn.clicked.connect(lambda _, a=action: self.on_service_action(a))
+            service_row.addWidget(btn)
+        panel_layout.addLayout(service_row)
 
         panel_layout.addStretch()
         panel.setLayout(panel_layout)
@@ -599,7 +590,7 @@ class KeyboardTab(QWidget):
         self.refresh_assigned_keys()  # a macro may have been saved or cleared
 
     def on_apply(self):
-        ok, err = apply_backlight(self.color_combo.currentText(), self.bright_slider.value())
+        ok, err = apply_backlight(self.color_combo.currentText())
         if not ok:
             QMessageBox.critical(self, "Error", err)
             return
@@ -607,7 +598,7 @@ class KeyboardTab(QWidget):
         self.canvas.set_board_color(QColor(*rgb))
 
     def on_set_as_default(self):
-        ok, err = set_as_default(self.color_combo.currentText(), self.bright_slider.value())
+        ok, err = set_as_default(self.color_combo.currentText())
         if not ok:
             QMessageBox.critical(self, "Error", err)
 
