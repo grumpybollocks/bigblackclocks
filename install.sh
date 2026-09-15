@@ -11,7 +11,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 echo "=== 1/6: Official repo packages ==="
-sudo pacman -S --needed --noconfirm yad python-pyqt5 python-pillow ydotool python-evdev freetype2
+sudo pacman -S --needed --noconfirm yad python-pyqt5 python-pillow ydotool python-evdev freetype2 zenity
 
 echo "=== 2/6: AUR packages (libg15, libg15render -- needs yay) ==="
 if ! command -v yay &>/dev/null; then
@@ -54,11 +54,52 @@ systemctl --user enable --now ydotool.service
 systemctl --user enable --now g510-lcd-stats.service g510-lcd-buttons.service g510-macro-daemon.service
 
 echo "=== 6/6: Desktop shortcuts ==="
-for f in "G510 LCD - App" "G510 LCD - Rebuild" "G510 LCD - Start" "G510 LCD - View Logs" "G510 LCD - Project Folder"; do
-    if [ -f "$HOME/Desktop/$f.desktop" ]; then
-        chmod +x "$HOME/Desktop/$f.desktop"
-    fi
-done
+# Generated fresh from the resolved $DIR every run -- a clean clone used to
+# get zero shortcuts here (this step only chmod'd ones that had to already
+# exist by hand). Written to BOTH ~/Desktop and ~/.local/share/applications:
+# several desktop environments (GNOME notably) don't show desktop icons by
+# default at all, so ~/Desktop alone leaves the app menu with nothing.
+# Pattern matches the G910 sibling app's install-g910.sh, already verified
+# working there.
+mkdir -p "$HOME/Desktop" "$HOME/.local/share/applications"
+
+write_shortcut() {
+    # $1=display name  $2=xdg filename stem  $3=Comment  $4=Exec  $5=Icon
+    local entry="[Desktop Entry]
+Type=Application
+Name=$1
+Comment=$3
+Exec=$4
+Icon=$5
+Terminal=false
+Categories=Utility;"
+    echo "$entry" > "$HOME/Desktop/$1.desktop"
+    chmod +x "$HOME/Desktop/$1.desktop"
+    command -v gio &>/dev/null && gio set "$HOME/Desktop/$1.desktop" metadata::trusted true 2>/dev/null || true
+
+    echo "$entry" > "$HOME/.local/share/applications/$2.desktop"
+    chmod +x "$HOME/.local/share/applications/$2.desktop"
+}
+
+write_shortcut "G510 LCD - App" "g510-lcd-app" \
+    "G510 keyboard LCD control app (backlight, service control)" \
+    "python3 \"$DIR/src/g510_app.py\"" "preferences-desktop-color"
+
+write_shortcut "G510 LCD - Rebuild" "g510-lcd-rebuild" \
+    "Recompile the keyboard LCD program after editing and restart it" \
+    "konsole --noclose -e \"$DIR/scripts/rebuild.sh\"" "utilities-terminal"
+
+write_shortcut "G510 LCD - Start" "g510-lcd-start" \
+    "One-click start for the keyboard LCD screen and button services" \
+    "\"$DIR/scripts/start.sh\"" "media-playback-start"
+
+write_shortcut "G510 LCD - View Logs" "g510-lcd-view-logs" \
+    "Watch live logs from the keyboard LCD screen and button services" \
+    "konsole --noclose -e \"$DIR/scripts/view-logs.sh\"" "utilities-terminal"
+
+write_shortcut "G510 LCD - Project Folder" "g510-lcd-project-folder" \
+    "Open the keyboard LCD project source and files" \
+    "dolphin \"$DIR\"" "folder"
 
 echo ""
 echo "=== Done -- one manual step left ==="
