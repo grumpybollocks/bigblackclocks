@@ -174,6 +174,32 @@ but the *publish* step targets that future clean repo, not this one.
 This same blocker and resolution applies to the G910 side's equivalent
 phase (their own "Phase B") — same shared repo, same history.
 
+**Real technical blocker found while starting on this tonight (2026-09-15),
+before writing an actual PKGBUILD**: this app's entire path model
+assumes everything lives under one `PROJECT_DIR` -- the C binary gets
+it baked in at compile time (`-DPROJECT_DIR`), and it's where the
+label font, `custom_screens.txt`, `macros.json`, and
+`custom_screen_images/` all live too, all in the same directory as the
+program's own source. A real Arch package can't work that way: program
+files belong under `/usr/lib/g510-lcd/` (root-owned, read-only,
+replaced wholesale on every upgrade), while `custom_screens.txt`,
+`macros.json`, and imported images are the user's own live data and
+need to survive a package upgrade untouched -- they'd need to move to
+something like `~/.config/g510-lcd/` or `~/.local/share/g510-lcd/`
+instead.
+
+That's a real code change (new path-resolution logic in both
+`g510_lcd_stats.c` and `g510_app.py`, plus a first-run migration for
+anyone with existing data in the old location) touching exactly the
+kind of path-resolution code that already caused two real bugs earlier
+tonight (the `PROJECT_DIR` compile-time fallback that still leaked a
+username, and the `DISK_FRIGIDER_PATH` hardcoded-username fix) -- not
+something to attempt as a rushed PKGBUILD wrapper, and not something to
+do while the user is asleep and can't verify it against the real
+keyboard. Treating this as its own careful sub-phase, with the same
+build-verify-confirm discipline as everything else in this plan, once
+Phase 0 is actually done and this phase is really started.
+
 Still a stretch goal, still not blocking anything in Phases 0-3.
 
 ## Why this order
