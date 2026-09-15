@@ -186,6 +186,28 @@ def active_profile_file():
     runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
     return Path(runtime, "g510_macro_profile")
 
+
+def read_active_screen_num():
+    """Mirrors g510_lcd_buttons.c's screen_state_path()/read_screen() --
+    the same runtime state file g510_lcd_buttons.c writes and
+    g510_lcd_stats.c itself reads to decide what to actually draw, so
+    this reflects reality rather than a guess. 0 or 1 both mean the
+    default clock screen (L1, see the C source's own L1-cycle comment);
+    2-5 mean L2-L5. Falls back to 1 (L1) for anything unexpected --
+    state file missing (service not running yet), malformed, or a
+    stray value outside the real range."""
+    import os
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    try:
+        s = int(Path(runtime, "g510lcd_screen").read_text().strip())
+    except Exception:
+        return 1
+    if s in (0, 1):
+        return 1
+    if 2 <= s <= 5:
+        return s
+    return 1
+
 COLOR_RGB = {
     "Blue-Violet": (110, 0, 255),
     "Red": (255, 0, 0),
@@ -551,6 +573,18 @@ class KeyboardTab(QWidget):
         self.poll_timer.timeout.connect(self.poll_hardware_state)
         self.poll_timer.start(500)
 
+        # Live-mirrors whatever's actually showing on the physical LCD
+        # into the canvas's LCD cell. Separate, much slower timer than
+        # poll_hardware_state above -- this one shells out to the real
+        # C binary each tick (render_preview()), so 500ms would mean 2
+        # subprocess spawns/sec for a screen that doesn't need to be
+        # that responsive; 2s roughly matches the real stats refresh
+        # cadence (see G510_README.md) instead.
+        self.lcd_mirror_timer = QTimer(self)
+        self.lcd_mirror_timer.timeout.connect(self.refresh_lcd_mirror)
+        self.lcd_mirror_timer.start(2000)
+        self.refresh_lcd_mirror()  # don't wait 2s for the first frame
+
     def select_profile(self, name):
         self.current_profile = name
         self.canvas.set_active_mkey(name)
@@ -574,6 +608,20 @@ class KeyboardTab(QWidget):
         without opening each key's dialog to check."""
         assigned = load_macros().get(self.current_profile, {}).keys()
         self.canvas.set_assigned_keys(assigned)
+
+    def refresh_lcd_mirror(self):
+        """Renders whatever screen is actually active right now
+        (read_active_screen_num()) and pushes it into the canvas's LCD
+        cell -- same render_preview() the Custom Screens editor uses,
+        so this is provably pixel-identical to the real hardware, not
+        a guess. A render failure (binary not built yet, transient
+        error) just leaves the canvas showing its last good frame (or
+        the placeholder, before the first one) rather than clearing it
+        -- a missed tick shouldn't blank a screen that was fine a
+        moment ago."""
+        pixmap, _bounds, err = render_preview(read_active_screen_num(), tag="canvas")
+        if pixmap is not None:
+            self.canvas.set_lcd_pixmap(pixmap)
 
     def poll_hardware_state(self):
         try:
@@ -767,16 +815,23 @@ def _parse_bounds_meta(meta_path):
     return bounds
 
 
-def render_preview(screen_num):
+def render_preview(screen_num, tag="app"):
     """Runs the same C binary that draws the real LCD, in one-shot
     --preview mode, and returns (QPixmap, bounds, err) -- the pixmap is
     guaranteed pixel-identical to what the real screen shows, since
     it's the same drawing code. bounds is real per-element pixel
     geometry (see _parse_bounds_meta), empty dict for non-custom
-    screens or if the sidecar wasn't written."""
+    screens or if the sidecar wasn't written.
+
+    `tag` picks the output file so independent callers (the Custom
+    Screens editor's own live preview, the canvas's LCD-mirror
+    thumbnail) never race on the same /tmp file -- two callers hitting
+    this at once with the same tag could still interleave a partial
+    read; distinct tags avoid that entirely rather than relying on
+    both finishing fast enough not to matter."""
     if not STATS_BINARY.exists():
         return None, {}, "Not built yet -- run install.sh or rebuild the C programs."
-    out_path = Path("/tmp/g510_app_preview.ppm")
+    out_path = Path(f"/tmp/g510_app_preview_{tag}.ppm")
     meta_path = Path(str(out_path) + ".meta")
     try:
         result = subprocess.run(
@@ -1375,7 +1430,7 @@ class CustomScreensTab(QWidget):
         self.elements_layout.addStretch()
 
     def refresh_preview(self):
-        pixmap, bounds, err = render_preview(self.screen_number())
+        pixmap, bounds, err = render_preview(self.screen_number(), tag="editor")
         if pixmap is None:
             print(f"Custom Screens preview error: {err}")  # surfaced in the panel below instead of blocking the canvas
             return

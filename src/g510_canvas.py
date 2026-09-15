@@ -80,12 +80,15 @@ MKEY_CELLS = [
 ]
 MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 
-# --- LCD: decorative only, top-center above the main board -- this is
-# NOT the Custom Screens tab, just a visual placeholder so the canvas
-# looks like the real keyboard. No click handler, no connection to the
-# LCD daemon/state at all.
+# --- LCD: top-center above the main board (0..15 -> true center at
+# col 7.5, minus half this cell's own width). Bigger and properly
+# centered per direct request -- was col=5/width=3.2 (visually
+# off-center, closer to the G-keys side than the main board's true
+# middle). No click handler still -- see set_lcd_pixmap() below for
+# what it DOES show now: a live-mirrored thumbnail of whatever's
+# actually on the physical LCD right now, not just a placeholder.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -1.3, 5, width=3.2, height=0.85, kind="lcd"),
+    Cell("_LCD", "LCD", -1.3, 5.3, width=4.4, height=1.2, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
@@ -186,8 +189,18 @@ class G510Canvas(QWidget):
         self._active_mkey = "M1"
         self._mr_active = False
         self._assigned = set()  # G-key names with a macro in the current profile
+        self._lcd_pixmap = None  # live mirror of the real LCD, set by set_lcd_pixmap()
         self.setMouseTracking(True)  # needed to get hover moves without a button held
         self._compute_size()
+
+    def set_lcd_pixmap(self, pixmap):
+        """A live-rendered thumbnail of whatever's actually on the
+        physical LCD right now (see KeyboardTab's refresh_lcd_mirror()
+        in g510_app.py, which decides WHICH screen to render and calls
+        this on a timer). None falls back to the plain placeholder
+        fill+label, e.g. before the first render completes."""
+        self._lcd_pixmap = pixmap
+        self.update()
 
     def set_board_color(self, qcolor):
         self._board_color = qcolor
@@ -276,9 +289,21 @@ class G510Canvas(QWidget):
             painter.setPen(QPen(border, pen_width))
             painter.drawPath(path)
 
-            painter.setPen(self._label_color(fill))
-            painter.setFont(mkey_font if cell.kind == "mkey" else font)
-            painter.drawText(rect, Qt.AlignCenter, cell.label)
+            if cell.kind == "lcd" and self._lcd_pixmap is not None:
+                # Real LCD is 160x43 (3.72:1) -- KeepAspectRatio never
+                # upscales past the cell's own bounds, so a mismatched
+                # cell aspect ratio just letterboxes instead of
+                # stretching/distorting the mirrored content.
+                scaled = self._lcd_pixmap.scaled(
+                    rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                px = rect.x() + (rect.width() - scaled.width()) / 2
+                py = rect.y() + (rect.height() - scaled.height()) / 2
+                painter.drawPixmap(int(px), int(py), scaled)
+            else:
+                painter.setPen(self._label_color(fill))
+                painter.setFont(mkey_font if cell.kind == "mkey" else font)
+                painter.drawText(rect, Qt.AlignCenter, cell.label)
 
     def _is_clickable(self, cell):
         return cell is not None and (cell.kind == "gkey" or cell.key_name in ("_M1", "_M2", "_M3"))
