@@ -1157,7 +1157,7 @@ class ScreenPreviewCanvas(QWidget):
             est_h = round(ELEMENT_HIT_H * h_ratio)
             return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
                          est_w * PREVIEW_SCALE, est_h * PREVIEW_SCALE)
-        b = self._bounds.get(index)
+        b = self._bounds.get(self._sensor_rank(index))
         if b and "label_x1" in b:
             # Real geometry: covers the label through the end of the
             # bar (if any), so the whole visible element is grabbable,
@@ -1176,9 +1176,23 @@ class ScreenPreviewCanvas(QWidget):
             ELEMENT_HIT_W * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE,
         )
 
+    def _sensor_rank(self, index):
+        """Real bug found by self-audit: g510_lcd_stats.c's --preview
+        mode draws sensors, images, and text in three SEPARATE loops
+        (see draw_custom_screen()), each with its own counter -- the
+        .meta bounds sidecar's indices are therefore a sensor's rank
+        among SENSOR elements only (0, 1, 2...), not its position in
+        this combined sensor+image+text list. Looking bounds up by the
+        raw combined index silently returns wrong (or missing) data for
+        any sensor that has a text/image element before it in the list
+        -- confirmed by building a sensor+image+sensor screen and
+        diffing the returned rect against the real C-measured bounds
+        directly, not assumed. This computes the correct lookup key."""
+        return sum(1 for e in self._elements[:index] if e.get("kind", "sensor") == "sensor")
+
     def _resize_handle_rect(self, index):
         el = self._elements[index]
-        b = self._bounds.get(index)
+        b = self._bounds.get(self._sensor_rank(index))
         r = RESIZE_HANDLE_PX * PREVIEW_SCALE
         if el.get("kind") == "image":
             # Bottom-right corner of the image's own known box -- no
@@ -1322,8 +1336,21 @@ class ScreenPreviewCanvas(QWidget):
             return
         self.setCursor(Qt.ClosedHandCursor)
         new_pos = event.pos() - self._drag_offset
-        x = max(0, min(LCD_WIDTH - 1, round(new_pos.x() / PREVIEW_SCALE)))
-        y = max(0, min(LCD_HEIGHT - 1, round(new_pos.y() / PREVIEW_SCALE)))
+        # Real bug found by self-audit, and it matches a direct report
+        # ("elements still overflow under the screen where i cant take
+        # out of"): this clamp only ever bounded the element's TOP-LEFT
+        # corner to the visible screen, never its actual size -- so an
+        # element could be dragged until most of its real content hung
+        # off the bottom/right edge, at which point its now off-screen
+        # hit-box made it hard or impossible to grab back. Measures the
+        # element's real current size (via _element_rect, which already
+        # has the fixed sensor-rank bounds lookup) and clamps so its
+        # FAR edge can never leave the visible 160x43 screen either.
+        rect = self._element_rect(self._drag_index)
+        w_lcd = max(1, round(rect.width() / PREVIEW_SCALE))
+        h_lcd = max(1, round(rect.height() / PREVIEW_SCALE))
+        x = max(0, min(LCD_WIDTH - w_lcd, round(new_pos.x() / PREVIEW_SCALE)))
+        y = max(0, min(LCD_HEIGHT - h_lcd, round(new_pos.y() / PREVIEW_SCALE)))
         el = self._elements[self._drag_index]
         if el["x"] != x or el["y"] != y:
             el["x"], el["y"] = x, y
@@ -1446,14 +1473,18 @@ class CustomScreensTab(QWidget):
         # into _image_resize_next rather than spawning overlapping
         # subprocesses; _image_resize_screen guards against a result
         # landing on the wrong screen if you somehow switch screens
-        # while one is in flight (a drag ends the moment the mouse
-        # button is released, which normal Qt mouse-grab behavior
-        # requires before a screen tab click could register anyway, but
-        # this keeps it correct even so).
+        # while one is in flight. _image_resize_el is the actual element
+        # dict object the worker was started for -- a real self-audit
+        # bug: removing a different element earlier in the list while a
+        # resize was in flight could shift a surviving element into the
+        # same index, silently misapplying the resize to it. Checking
+        # identity (`elements[index] is el_token`), not just the index
+        # bound, is what actually closes that.
         self._image_resize_worker = None
         self._image_resize_next = None
         self._image_resize_screen = None
-        canvas_col.addWidget(self.preview_canvas)
+        self._image_resize_el = None
+        canvas_col.addWidget(self.preview_canvas, alignment=Qt.AlignHCenter)
 
         drag_hint = QLabel(
             "Drag anything to move it. Hover a bar or a freshly-imported "
@@ -1540,6 +1571,16 @@ class CustomScreensTab(QWidget):
         panel_layout.addSpacing(6)
         panel_layout.addWidget(sep)
         panel_layout.addSpacing(6)
+
+        # Recovery for the drag-clamp bug: an element dragged before
+        # this fix could have its content still hanging off the visible
+        # screen edge, with its now off-screen hit-box making it hard
+        # to grab back. Only shown when something's actually off-screen.
+        self.fix_overflow_btn = QPushButton("Bring off-screen elements back")
+        self.fix_overflow_btn.setObjectName("PanelButton")
+        self.fix_overflow_btn.clicked.connect(self.on_fix_overflow)
+        self.fix_overflow_btn.hide()
+        panel_layout.addWidget(self.fix_overflow_btn)
 
         panel_layout.addWidget(QLabel("Elements on this screen:"))
         # Fixed-height scroll area -- previously a long unbounded list
@@ -1810,6 +1851,25 @@ class CustomScreensTab(QWidget):
         self.refresh_elements_list()
         self.refresh_preview()
 
+    def on_fix_overflow(self):
+        # Same size estimate refresh_elements_list uses to decide
+        # whether to show this button -- clamps each offending element
+        # back so its far edge stays on the visible 160x43 screen,
+        # same rule the drag-clamp fix now enforces for new drags.
+        for el in self.config[self.current_screen]:
+            if el.get("kind") == "image":
+                w, h = el.get("width", 0), el.get("height", 0)
+            elif el.get("kind") == "text":
+                _, h_ratio = FONT_SIZE_SCALE.get(el.get("font_size", 0), (1.0, 1.0))
+                w, h = TEXT_CHAR_PX, round(ELEMENT_HIT_H * h_ratio)
+            else:
+                w, h = ELEMENT_HIT_W, ELEMENT_HIT_H
+            el["x"] = max(0, min(el["x"], LCD_WIDTH - w))
+            el["y"] = max(0, min(el["y"], LCD_HEIGHT - h))
+        save_custom_screens(self.config)
+        self.refresh_elements_list()
+        self.refresh_preview()
+
     def on_cycle_font_size(self, index):
         el = self.config[self.current_screen][index]
         # Bars cap at Medium -- same reasoning as on_style_changed's
@@ -1867,6 +1927,18 @@ class CustomScreensTab(QWidget):
         out_full = DATA_DIR / el["path"]
         png_to_lcd = PROJECT_DIR / "src" / "png-to-lcd.py"
         self._image_resize_screen = self.current_screen
+        # Real bug found by self-audit: an index alone isn't a stable
+        # identity across an async gap. Removing (or reordering) an
+        # earlier element while this worker is still running would
+        # leave a DIFFERENT element sitting at `index` by the time the
+        # result comes back -- confirmed with a real "remove element 0
+        # while resizing element 0" race, which misapplied the resize
+        # to the surviving element that shifted into that slot. `el`
+        # itself is the same dict object Python already holds a
+        # reference to in the list -- keeping that reference lets
+        # _on_image_resize_finished verify identity (`is`), not just
+        # a bounds check, before writing anything.
+        self._image_resize_el = el
         worker = ImageResizeWorker(index, src_full, out_full, target_w, target_h, png_to_lcd)
         worker.finished_resize.connect(self._on_image_resize_finished)
         self._image_resize_worker = worker
@@ -1874,10 +1946,12 @@ class CustomScreensTab(QWidget):
 
     def _on_image_resize_finished(self, index, w, h, ok):
         started_on = self._image_resize_screen
+        el_token = self._image_resize_el
         self._image_resize_worker = None
+        self._image_resize_el = None
         if ok and started_on == self.current_screen:
             elements = self.config.get(self.current_screen, [])
-            if index < len(elements) and elements[index].get("kind") == "image":
+            if index < len(elements) and elements[index] is el_token:
                 elements[index]["width"], elements[index]["height"] = w, h
                 save_custom_screens(self.config)
                 self.refresh_preview()
@@ -1909,6 +1983,7 @@ class CustomScreensTab(QWidget):
                 item.widget().deleteLater()
 
         if self.current_screen == "L1":
+            self.fix_overflow_btn.hide()
             info = QLabel("L1 is the built-in clock screen -- shown here for reference, not editable.")
             info.setWordWrap(True)
             info.setObjectName("Status")
@@ -1917,6 +1992,25 @@ class CustomScreensTab(QWidget):
             return
 
         elements = self.config[self.current_screen]
+        # Recovery-button visibility: rough estimate (not pixel-perfect
+        # -- this is just "does it look like something's clipped",
+        # matching the same category of approximation already used
+        # elsewhere for kinds without exact measured bounds) of whether
+        # any element's content likely extends past the visible screen.
+        overflowing = False
+        for el in elements:
+            if el.get("kind") == "image":
+                w, h = el.get("width", 0), el.get("height", 0)
+            elif el.get("kind") == "text":
+                _, h_ratio = FONT_SIZE_SCALE.get(el.get("font_size", 0), (1.0, 1.0))
+                w, h = TEXT_CHAR_PX, round(ELEMENT_HIT_H * h_ratio)
+            else:
+                w, h = ELEMENT_HIT_W, ELEMENT_HIT_H
+            if el["x"] + w > LCD_WIDTH or el["y"] + h > LCD_HEIGHT:
+                overflowing = True
+                break
+        self.fix_overflow_btn.setVisible(overflowing)
+
         if not elements:
             self.elements_layout.addWidget(QLabel("Nothing on this screen yet."))
             self.elements_layout.addStretch()
