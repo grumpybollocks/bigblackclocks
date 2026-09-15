@@ -1700,7 +1700,16 @@ class CustomScreensTab(QWidget):
         # into their real place on the preview. y wraps back to the top
         # once it'd run off the bottom of the 43px screen, rather than
         # placing something permanently off-screen.
-        default_y = (6 + 12 * sensor_count) % LCD_HEIGHT
+        #
+        # Self-audit bug: this used to stagger by sensor_count alone,
+        # so the Nth sensor and the Nth text element (or image) landed
+        # on the exact same default spot -- e.g. the first-ever text
+        # field and the first-ever sensor both defaulted to (6,6),
+        # confirmed by reproducing it directly. Staggering by the
+        # TOTAL element count on screen instead means a freshly-added
+        # element never lands on top of whatever was added right
+        # before it, regardless of kind.
+        default_y = (6 + 12 * len(elements)) % LCD_HEIGHT
         elements.append({
             "kind": "sensor",
             "sensor": self.sensor_combo.currentData(),
@@ -1787,12 +1796,12 @@ class CustomScreensTab(QWidget):
             QMessageBox.critical(self, "Import failed", f"Unexpected converter output: {result.stdout!r}")
             return
 
-        # Stagger the default drop spot by how many images are already on
-        # this screen (mirrors on_add_element's default_y wrap for sensors)
-        # -- otherwise a second import lands exactly on top of the first,
-        # invisible until you notice and drag the top one out of the way.
-        default_x = min(6 + 20 * image_count, max(0, LCD_WIDTH - w))
-        default_y = min(6 + 15 * image_count, max(0, LCD_HEIGHT - h))
+        # Stagger by the TOTAL element count on screen, not just other
+        # images -- same cross-kind collision fix as on_add_element
+        # (an image and a same-numbered sensor/text used to be able to
+        # land on the same default spot).
+        default_x = min(6 + 20 * len(elements), max(0, LCD_WIDTH - w))
+        default_y = min(6 + 15 * len(elements), max(0, LCD_HEIGHT - h))
         elements.append({
             "kind": "image",
             "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against data_dir()
@@ -1834,9 +1843,11 @@ class CustomScreensTab(QWidget):
             return
 
         # Same staggered-default-position pattern as on_add_element/
-        # on_import_image -- otherwise a second text field lands
-        # exactly on top of the first, invisible until dragged away.
-        default_y = (6 + 12 * text_count) % LCD_HEIGHT
+        # on_import_image, staggered by the TOTAL element count (see
+        # on_add_element for the cross-kind collision this fixes) --
+        # otherwise a second text field (or a sensor/image added right
+        # after one) could land exactly on top of it.
+        default_y = (6 + 12 * len(elements)) % LCD_HEIGHT
         elements.append({
             "kind": "text", "content": content, "x": 6, "y": default_y,
             "font_size": self.font_size_combo.currentData(),
