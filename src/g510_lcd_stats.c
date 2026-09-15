@@ -295,7 +295,18 @@ static g15font *label_font = NULL;
 #ifndef PROJECT_DIR
 #error "PROJECT_DIR not defined -- compile via install.sh or scripts/rebuild.sh, or pass -DPROJECT_DIR='\"/your/checkout/path\"' yourself"
 #endif
-#define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
+/* Checks ~/.local/share/g510-lcd/fonts/ first (always user-writable,
+   works identically whether this binary is a dev checkout or a real
+   package under root-owned /usr/lib/g510-lcd) before falling back to
+   the PROJECT_DIR-relative path (keeps working for anyone who already
+   has their converted font sitting in a dev checkout, no migration
+   needed -- the fallback is permanent, not a one-time transition).
+   Can't ship the font itself either way (commercial license), so this
+   doesn't remove the manual conversion step -- it just means that
+   step no longer needs sudo for a packaged install. */
+#define FONT_PATH_FALLBACK PROJECT_DIR "/fonts/lcd-label-8.fnt"
+/* font_path() itself is defined further down, right after data_dir()
+   -- it calls data_dir(), which needs to exist first. */
 
 /* Your own custom-screens config and imported images live under
    ~/.local/share/g510-lcd, independent of where the program itself is
@@ -378,6 +389,14 @@ static const char *data_dir(void) {
         ready = 1;
     }
     return dir;
+}
+
+static const char *font_path(void) {
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/fonts/lcd-label-8.fnt", data_dir());
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return path; }
+    return FONT_PATH_FALLBACK;
 }
 
 static const char *custom_screens_path(void) {
@@ -827,7 +846,7 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
 }
 
 int main(int argc, char **argv) {
-    label_font = g15r_loadG15Font(FONT_PATH);
+    label_font = g15r_loadG15Font((char*)font_path());
     if (!label_font) { fprintf(stderr, "failed to load custom font\n"); return 1; }
 
     /* One-shot preview mode: render a single screen to an image file

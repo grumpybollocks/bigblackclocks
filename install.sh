@@ -34,9 +34,19 @@ gcc $(pkg-config --cflags freetype2) -DPROJECT_DIR="\"$DIR\"" src/g510_lcd_stats
 gcc src/g510_lcd_buttons.c -o src/g510_lcd_buttons
 
 echo "=== 4/6: udev rules + hwdb (needs sudo) ==="
-# The checked-in rule has a __PROJECT_DIR__ placeholder instead of a
-# real path (same reasoning as -DPROJECT_DIR above) -- substitute it
-# here rather than committing any one checkout's location.
+# The backlight-restore-on-hotplug script needs a fixed system location
+# udev can always find regardless of where this checkout lives (root,
+# no per-user $HOME to resolve at hotplug time) -- installed here
+# rather than referenced via a __PROJECT_DIR__ placeholder, and at the
+# exact same path the PKGBUILD installs it to, so the udev rule itself
+# never needs to know which install method put it there.
+sudo mkdir -p /usr/lib/g510-lcd
+sudo cp scripts/restore-backlight.sh /usr/lib/g510-lcd/restore-backlight.sh
+sudo chmod 755 /usr/lib/g510-lcd/restore-backlight.sh
+# The checked-in rule no longer has any __PROJECT_DIR__ placeholder to
+# substitute (the one that used to need it, the backlight-restore
+# line, now points at the fixed path above) -- this sed is harmless
+# insurance, not load-bearing, in case that ever changes again.
 sed "s|__PROJECT_DIR__|$DIR|g" udev/99-g510-lcd.rules | sudo tee /etc/udev/rules.d/99-g510-lcd.rules > /dev/null
 sudo cp udev/91-g510-stop-to-playpause.hwdb /etc/udev/hwdb.d/91-g510-stop-to-playpause.hwdb
 sudo udevadm control --reload-rules

@@ -72,19 +72,20 @@ EOF
       <(sed "s|__PROJECT_DIR__|/usr/lib/$pkgname|g" "services/$svc.service")
   done
 
-  # The symlink/permission rules have no PROJECT_DIR dependency at all
-  # and are genuinely load-bearing (g510_lcd_stats.c and
-  # g510_lcd_buttons.c both hard-depend on /dev/g510-lcd and
-  # /dev/g510-keys existing -- this isn't optional polish the way the
-  # backlight-restore line below is). Only the one RUN+= line that
-  # shells out to set-backlight-color.sh is dropped: that script's
-  # write location depends on which user's session applied a color
-  # (~/.local/share/g510-lcd/), and udev fires as root with no
-  # meaningful per-user $HOME to resolve at that point -- a real,
-  # narrower gap than "no udev rule," documented in README.md, not
-  # silently papered over.
-  install -Dm644 /dev/stdin "$pkgdir/usr/lib/udev/rules.d/99-g510-lcd.rules" < \
-    <(sed 's|, RUN+="__PROJECT_DIR__/scripts/set-backlight-color.sh"||' udev/99-g510-lcd.rules)
+  # Installed unmodified -- the rule's one line that used to need a
+  # __PROJECT_DIR__ substitution (backlight-restore-on-hotplug) now
+  # calls a fixed-location wrapper instead (see restore-backlight.sh
+  # below), so there's nothing left to strip or substitute here.
+  install -Dm644 udev/99-g510-lcd.rules "$pkgdir/usr/lib/udev/rules.d/99-g510-lcd.rules"
+
+  # udev fires as root with no per-user $HOME to resolve -- this
+  # wrapper finds whoever actually has the active seat0 session via
+  # loginctl at hotplug time instead, then execs THEIR own saved
+  # ~/.local/share/g510-lcd/set-backlight-color.sh. Zero PROJECT_DIR
+  # dependency, so it's installed at the exact same fixed path
+  # install.sh also uses -- the udev rule itself is identical either
+  # way, dev checkout or real package.
+  install -Dm755 scripts/restore-backlight.sh "$pkgdir/usr/lib/$pkgname/restore-backlight.sh"
 
   install -Dm644 packaging/g510-lcd/g510-lcd.desktop \
     "$pkgdir/usr/share/applications/$pkgname.desktop"
