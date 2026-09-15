@@ -80,19 +80,22 @@ MKEY_CELLS = [
 ]
 MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 
-# --- LCD: top-center above the main board (0..15 -> true center at
-# col 7.5, minus half this cell's own width). On its own row (-2.95,
-# above the M-key row at -1.3 rather than sharing it) so it has real
-# vertical room to grow -- the first "bigger" attempt (height=1.2)
-# was still constrained by the M-key row's slot and came out
-# *smaller* than the real LCD's native 160x43 once KeepAspectRatio
-# scaled it into that box (effective ~0.9x -- direct report: "i
-# barely can see it"). This size renders at ~2.2x native scale
-# instead. No column overlap with the M-key row either way (M-keys
-# sit at col -3.3..0, this at col 2.5..12.5), so the two rows never
-# actually compete for the same pixels regardless.
+# --- LCD: top-center above the WHOLE board. Real, visible mistake in
+# the previous pass: centered against MAIN_CELLS alone (col range
+# 0..15, center 7.5) instead of the true full render including G-keys
+# and the nav/numpad cluster (col range -3.3..23.5, center 10.1) --
+# looked centered against the F-row/alphanumeric block in isolation
+# but visibly left-shifted against the actual whole-keyboard image, a
+# real screenshot caught it directly. col computed as true_center -
+# width/2 = 10.1 - 5.0 = 5.1.
+#
+# On its own row (-2.95, above the M-key row at -1.3 rather than
+# sharing it) so it has real vertical room to grow -- the first
+# "bigger" attempt (height=1.2) was still constrained by the M-key
+# row's slot and came out *smaller* than the real LCD's native 160x43
+# once scaled into that box. This size renders at ~2.2x native scale.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -2.95, 2.5, width=10.0, height=2.7, kind="lcd"),
+    Cell("_LCD", "LCD", -2.95, 5.1, width=10.0, height=2.7, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
@@ -298,8 +301,15 @@ class G510Canvas(QWidget):
                 # upscales past the cell's own bounds, so a mismatched
                 # cell aspect ratio just letterboxes instead of
                 # stretching/distorting the mirrored content.
+                # FastTransformation (nearest-neighbor), not Smooth --
+                # this is a 1-bit monochrome pixel display being
+                # mirrored at ~2.2x; bilinear smoothing blurs its sharp
+                # pixel edges into soft gray gradients (direct report:
+                # "looks blurry now"), where nearest-neighbor keeps it
+                # crisp and blocky, honestly representing what the real
+                # hardware actually looks like instead of prettifying it.
                 scaled = self._lcd_pixmap.scaled(
-                    rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    rect.size().toSize(), Qt.KeepAspectRatio, Qt.FastTransformation
                 )
                 px = rect.x() + (rect.width() - scaled.width()) / 2
                 py = rect.y() + (rect.height() - scaled.height()) / 2
