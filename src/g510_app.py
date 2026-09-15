@@ -32,6 +32,17 @@ import g510_canvas
 PROJECT_DIR = Path(__file__).resolve().parent.parent  # repo root (this file lives in src/)
 LED_DIR = Path("/sys/class/leds/g15::kbd_backlight")
 DEFAULTS_SCRIPT = PROJECT_DIR / "scripts" / "set-backlight-color.sh"
+# The udev rule (99-g510-lcd.rules) has this exact path baked in at
+# install time (see install.sh), so this location can't just move --
+# doing that alone, without also re-running install.sh's sudo udev
+# step, would leave the live udev rule pointing at a script that stops
+# getting updated (replugging the keyboard would silently restore a
+# stale color). Also writing the same content to DATA_DIR so a future
+# packaged install (whose /usr/lib/g510-lcd is root-owned -- this
+# PROJECT_DIR-relative write would fail there) has a real, current
+# copy ready once its own udev rule points at the right place -- a
+# deliberately deferred gap, documented in packaging/g510-lcd/README.md.
+# (DEFAULTS_SCRIPT_DATA_DIR is set further down, once DATA_DIR exists.)
 MAIN_KEYBOARD_DEVICE = "/dev/input/by-id/usb-Logitech_G510s_Gaming_Keyboard-event-kbd"
 STATS_BINARY = PROJECT_DIR / "src" / "g510_lcd_stats"
 
@@ -69,6 +80,7 @@ _migrate_dir_if_needed(PROJECT_DIR / "custom_screen_images", DATA_DIR / "custom_
 
 MACROS_FILE = DATA_DIR / "macros.json"
 CUSTOM_SCREENS_FILE = DATA_DIR / "custom_screens.txt"
+DEFAULTS_SCRIPT_DATA_DIR = DATA_DIR / "set-backlight-color.sh"
 LCD_WIDTH = 160
 LCD_HEIGHT = 43
 
@@ -209,8 +221,18 @@ def write_defaults_script(rgb, brightness_val):
 echo {brightness_val} > /sys/class/leds/g15::kbd_backlight/brightness
 echo "{rgb[0]} {rgb[1]} {rgb[2]}" > /sys/class/leds/g15::kbd_backlight/multi_intensity
 """
-    DEFAULTS_SCRIPT.write_text(script)
-    DEFAULTS_SCRIPT.chmod(0o755)
+    # The currently-installed udev rule has DEFAULTS_SCRIPT's path baked
+    # in, so it has to keep being written for replug-restore to keep
+    # working -- but this fails with PermissionError in a packaged
+    # install (/usr/lib/g510-lcd is root-owned), which is expected
+    # there, not a real error to surface.
+    try:
+        DEFAULTS_SCRIPT.write_text(script)
+        DEFAULTS_SCRIPT.chmod(0o755)
+    except PermissionError:
+        pass
+    DEFAULTS_SCRIPT_DATA_DIR.write_text(script)
+    DEFAULTS_SCRIPT_DATA_DIR.chmod(0o755)
 
 
 def apply_backlight(color_name, brightness_pct):
