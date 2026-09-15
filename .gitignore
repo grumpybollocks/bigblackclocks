@@ -13,3 +13,9 @@ fonts/*.fnt
 
 # Generated at runtime, not part of the project itself
 custom_screen_images/*.bin
+
+# G910 runtime state -- now lives under ~/.local/share/g910-control/
+# (XDG data dir), these repo-root copies were only ever git-clone-era
+# leftovers and are no longer read/written by the app.
+g910_profiles.json
+g910_macros.json
