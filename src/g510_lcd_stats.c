@@ -626,8 +626,16 @@ static void draw_clock_screen(g15canvas *c) {
     strftime(time_str, sizeof(time_str), "%H:%M:%S", t);
     strftime(date_str, sizeof(date_str), "%A, %d %B", t);
 
-    g15r_G15FPrint(c, time_str, 20, 8, G15_TEXT_LARGE, G15_JUSTIFY_LEFT, G15_COLOR_BLACK, 0);
-    g15r_renderString(c, (unsigned char*)date_str, 0, G15_TEXT_SMALL, 10, 30);
+    /* Direct request: "move the digital clock a bit down and the date
+       a bit up so theyre not so far away from eachother". Measured the
+       real gap first (rendered --preview, scanned lit pixel rows in
+       the left/digital-clock column): time occupied rows 8-14, date
+       rows 30-35, a 15px empty gap between them (rows 15-29). Moved
+       each 4px toward the other -- time to y=12 (rows 12-18), date to
+       y=26 (rows 26-31) -- shrinking the gap to 7px while staying well
+       clear of the screen edges (top/bottom) and each other. */
+    g15r_G15FPrint(c, time_str, 20, 12, G15_TEXT_LARGE, G15_JUSTIFY_LEFT, G15_COLOR_BLACK, 0);
+    g15r_renderString(c, (unsigned char*)date_str, 0, G15_TEXT_SMALL, 10, 26);
     draw_analog_clock(c, t);
 }
 
