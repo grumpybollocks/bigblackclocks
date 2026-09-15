@@ -191,22 +191,31 @@ def read_active_screen_num():
     """Mirrors g510_lcd_buttons.c's screen_state_path()/read_screen() --
     the same runtime state file g510_lcd_buttons.c writes and
     g510_lcd_stats.c itself reads to decide what to actually draw, so
-    this reflects reality rather than a guess. 0 or 1 both mean the
-    default clock screen (L1, see the C source's own L1-cycle comment);
-    2-5 mean L2-L5. Falls back to 1 (L1) for anything unexpected --
-    state file missing (service not running yet), malformed, or a
-    stray value outside the real range."""
+    this reflects reality rather than a guess.
+
+    Corrected after a real report ("the hardcoded L1 screen, not the
+    clock, the stats, are not visible") -- 0 and 1 are NOT both "the
+    clock". Reading g510_lcd_stats.c's own screen-select logic
+    directly: `screen == 1` draws the clock, `2 <= screen <= 5` draws
+    a custom L2-L5 screen, and everything else -- which in practice
+    means 0, the state before any L-button has ever been pressed --
+    draws the CPU/RAM/VRAM/TEMP stats screen. An earlier version of
+    this function collapsed 0 into 1, so the mirror silently showed
+    the clock instead of stats whenever the real hardware was on 0.
+    render_preview()/--preview accept 0-5 directly (same atoi(argv[2])
+    the live daemon's read_screen() feeds into), so no translation is
+    needed here beyond passing the real value through unchanged.
+
+    Falls back to 0 (stats -- the real default) for anything
+    unreadable: state file missing (service not running yet),
+    malformed, or a stray value outside the real 0-5 range."""
     import os
     runtime = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
     try:
         s = int(Path(runtime, "g510lcd_screen").read_text().strip())
     except Exception:
-        return 1
-    if s in (0, 1):
-        return 1
-    if 2 <= s <= 5:
-        return s
-    return 1
+        return 0
+    return s if 0 <= s <= 5 else 0
 
 COLOR_RGB = {
     "Blue-Violet": (110, 0, 255),

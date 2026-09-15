@@ -81,14 +81,18 @@ MKEY_CELLS = [
 MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 
 # --- LCD: top-center above the main board (0..15 -> true center at
-# col 7.5, minus half this cell's own width). Bigger and properly
-# centered per direct request -- was col=5/width=3.2 (visually
-# off-center, closer to the G-keys side than the main board's true
-# middle). No click handler still -- see set_lcd_pixmap() below for
-# what it DOES show now: a live-mirrored thumbnail of whatever's
-# actually on the physical LCD right now, not just a placeholder.
+# col 7.5, minus half this cell's own width). On its own row (-2.95,
+# above the M-key row at -1.3 rather than sharing it) so it has real
+# vertical room to grow -- the first "bigger" attempt (height=1.2)
+# was still constrained by the M-key row's slot and came out
+# *smaller* than the real LCD's native 160x43 once KeepAspectRatio
+# scaled it into that box (effective ~0.9x -- direct report: "i
+# barely can see it"). This size renders at ~2.2x native scale
+# instead. No column overlap with the M-key row either way (M-keys
+# sit at col -3.3..0, this at col 2.5..12.5), so the two rows never
+# actually compete for the same pixels regardless.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -1.3, 5.3, width=4.4, height=1.2, kind="lcd"),
+    Cell("_LCD", "LCD", -2.95, 2.5, width=10.0, height=2.7, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
