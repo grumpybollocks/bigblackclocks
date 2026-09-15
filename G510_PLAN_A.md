@@ -97,34 +97,29 @@ LED class genuinely coalescing/rounding intermediate writes. Not
 guessed at further here since it hasn't been investigated yet; that
 investigation is the actual Phase 1 task.
 
-## Phase 2 — Close the G510s-specific packaging gaps
+## Phase 2 — Close the G510s-specific packaging gaps — DONE 2026-09-15
 
-Pulled directly from `READY_FOR_ANYONE.md` (on `origin/main`, written
-after G910 reached this bar — not yet reconciled into `g510s-dev`'s
-copy of that file, since this file doesn't exist there at all yet).
-Real, already-scoped, already-diagnosed gaps, not new ones:
+Pulled directly from `READY_FOR_ANYONE.md` (brought into this branch
+this pass; didn't exist here before). All three real, already-scoped
+gaps closed and verified, not just coded:
 
-1. `install.sh`'s desktop-shortcut step only `chmod +x`'s files that
-   must already exist by hand. A genuinely fresh clone gets zero
-   desktop icons. Fix: generate them fresh from the resolved `$DIR` at
-   install time, the same way `install-g910.sh` already does on the
-   G910 side — a real, working reference implementation sitting in
-   this same repo, not a pattern to invent from scratch.
-2. `scripts/start.sh` calls `zenity`, which `install.sh` never checks
-   for or installs. Add it to the dependency list.
-3. Desktop launchers are only written to `~/Desktop`, not also
-   `~/.local/share/applications` — several desktop environments
-   (GNOME notably) don't show desktop icons by default at all, making
-   the app undiscoverable there. G910's installer already fixed the
-   identical gap; port the same fix.
+1. ~~`install.sh`'s desktop-shortcut step only `chmod +x`'s files that
+   must already exist by hand.~~ Fixed: now generates all 5 launchers
+   fresh from the resolved `$DIR`, ported from `install-g910.sh`'s
+   already-working pattern.
+2. ~~`scripts/start.sh` calls `zenity`, which `install.sh` never
+   checks for or installs.~~ Fixed: added to the dependency list.
+3. ~~Desktop launchers were only written to `~/Desktop`, not also
+   `~/.local/share/applications`.~~ Fixed: now written to both.
 
-When these are fixed, bring `READY_FOR_ANYONE.md` into this branch and
-update its G510s section (currently reads "audited, real gaps found,
-not yet fixed" on `main`) to match G910's "done and verified this
-pass" wording — following the same verify-live-not-just-fix pattern
-G910 used: actually run `install.sh` fresh, confirm the generated
-shortcuts/service paths are correct on this real machine, not just
-that the code changed.
+Verified by running just the shortcut-generation logic in isolation
+(not the full installer — that would trigger unrelated sudo/pacman/
+udev/systemd changes this fix doesn't touch), diffing the regenerated
+files against the real working originals on this machine (only diff:
+added `Exec=` path quoting, a real robustness improvement not a
+regression), confirmed the app still launches cleanly via the quoted
+command. `READY_FOR_ANYONE.md`'s G510s section updated to match G910's
+"done and verified this pass" wording, same file, same branch.
 
 ## Phase 3 — Merge to `main`
 
