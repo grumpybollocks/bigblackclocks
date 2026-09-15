@@ -37,10 +37,11 @@ replugs, and kernel updates. Does what it says on the tin.
 **G910 Control** — the app described above: the keyboard render sits in
 the middle (click a key to colour it, click a cluster to pick its zone
 in the sidebar, M1/M2/M3/MR are properly clickable), Colour Mode
-sidebar on the left, G-Keys macro strip tucked under the keyboard, and
-your saved lighting Profiles on the right.
+sidebar on the left with real named-colour presets and a hex field,
+G-Keys macro strip tucked under the keyboard, and your saved lighting
+Profiles on the right.
 
-![G910 Control app — v1](docs/screenshots/g910-control-v1.png)
+![G910 Control app — v2](docs/screenshots/g910-control-v2.png)
 
 **G510s Control** — the same idea, adapted to what this keyboard can
 actually do: one sysfs LED for the whole board instead of per-key RGB,
