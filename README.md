@@ -1,5 +1,9 @@
 # bigblackclocks
 
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3-blue.svg)
+![Platform: Arch Linux](https://img.shields.io/badge/platform-Arch%20Linux-1793d1.svg)
+
 Two Logitech gaming keyboards, the **G510s** and the **G910 Orion
 Spectrum** — same family, same era, same problem: nothing on Linux
 actually drives their hardware properly. Logitech's own software
@@ -127,3 +131,9 @@ personal:
   feedback that shipped an actual UI fix (resize handles now only show
   up when you're hovering near them, not all at once) — which is as
   good a reminder as any that real usage beats guessing every time.
+
+---
+
+## License
+
+[MIT](LICENSE).
