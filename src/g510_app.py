@@ -1256,11 +1256,12 @@ class CustomScreensTab(QWidget):
         panel_layout.addWidget(self.bar_hint_label)
 
         self.add_btn = add_btn = QPushButton("Add")
-        add_btn.setObjectName("Primary")
+        add_btn.setObjectName("PanelPrimary")
         add_btn.clicked.connect(self.on_add_element)
         panel_layout.addWidget(add_btn)
 
         self.import_image_btn = QPushButton("Import Image...")
+        self.import_image_btn.setObjectName("PanelButton")
         self.import_image_btn.clicked.connect(self.on_import_image)
         panel_layout.addWidget(self.import_image_btn)
 
