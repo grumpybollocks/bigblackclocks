@@ -18,6 +18,8 @@ Skip ahead to a specific section below if you need deep detail on something in p
 
 **Custom Screens phase-1 polish BUILT, on branch `g510s-dev`, NOT on main, NOT confirmed** (2026-09-15) — PNG/image import (already on main) got a post-launch self-audit that found and fixed two real robustness gaps (unterminated buffer on the image path field; height wasn't constrained on import, which combined with the other fix would have made a too-tall image silently vanish at load with zero feedback), then a discoverability pass on the editor itself, prompted by the user's ask (relayed via the peer session) to make it "very very well and intuitive" as final polish, not a rebuild: two images imported back-to-back no longer land on the exact same spot (invisible stacking), disabled controls on L1 now explain why via tooltip, and the persistent drag hint now covers images. Full regression suite green, headless-verified, real `custom_screens.txt` diffed untouched throughout — but per the rule above, none of this gets called "done" or merged/tagged until physically clicked through on the real keyboard.
 
+**Custom Screens text fields + L1 GUI fixes + analog clock BUILT, on branch `g510s-dev`, NOT on main, NOT confirmed** (2026-09-15) — L3-L5 gained user-addable text fields (up to 4/screen, drag-positioned like every other element, persisted as `TEXT content=... x=... y=...` lines in `custom_screens.txt`), the Custom Screens tab's L1 preview bug (intermittently flashing L2's content while typing, caused by three different callers racing on one shared `--preview` temp file) got a real fix (each caller now gets its own tagged temp file, plus atomic tmp+rename writes on the C side so no reader can ever see a half-written frame), and the L1 clock screen gained an analog clock face in its previously-empty right-hand space — see ANALOG CLOCK under Multi-Screen System below for the full build story. Full regression suite green (11 bugcheck scripts, hardware-touching ones included since they restore state), production binary rebuilt and the live `g510-lcd-stats.service` + GUI both restarted on this real machine — but per the rule above, none of this gets called "done" or merged/tagged until physically confirmed on the real keyboard.
+
 ## What v1.1 adds
 
 A "Custom Screens" tab in `g510_app.py` — an AIDA64-style dashboard builder for the L2-L5 buttons. Pick a screen (L2-L5), add sensors with a display style (Number or Bar) and an X/Y position, see the result in a live preview pane, Remove any element — every change auto-saves immediately (no separate Save button). New sensors beyond the original CPU/RAM/VRAM/CPU-Temp: GPU %, GPU Edge/Hotspot/VRAM temps, Swap %, Disk % (root + the "frigider" drive), Uptime, Network up/down speed, and 6 genuinely-unlabeled motherboard temps (shown honestly as "MB Temp 1..6", not invented names). Layouts are stored in `custom_screens.txt` (plain SCREEN/ELEMENT text lines, no JSON lib needed in C) and rendered by `g510_lcd_stats.c`'s `draw_custom_screen()`.
@@ -105,10 +107,25 @@ Three separate, unrelated problems were found and fixed on this exact keyboard. 
 A single file, `$XDG_RUNTIME_DIR/g510lcd_screen`, holds one number:
 
 - `0` = the stats screen (CPU/TEMP/VRAM/RAM, in that vertical order)
-- `1` = a clock
+- `1` = a clock (digital time+date on the left, plus an analog clock face on the right — see ANALOG CLOCK below)
 - `2-5` = "L2".."L5" test screens (see BUTTONS below)
 
 `g510_lcd_stats.c` re-reads this file every loop iteration (~1-2s) and draws whichever screen it says. `g510_lcd_buttons.c` is the only thing that ever WRITES to this file. To add a new screen: write a new `draw_XXX_screen()` function, add a branch for its number in `main()`'s loop, and make some button set that number in `g510_lcd_buttons.c`.
+
+### Analog clock (L1, right side)
+
+Direct request: fill the empty space to the right of the digital time+date on the clock screen with an analog clock face. Built in three passes, each a direct refinement request:
+
+1. First pass: plain square frame (`g15r_pixelBox`), no numerals, hands only — matched the display's blocky 1-bit aesthetic. Position wasn't guessed: rendered the real clock screen via `--preview` and scanned the actual pixel data for the rightmost lit (digital text) pixel — x=92, leaving a real measured gap, not an assumed one.
+2. Refinement ("rounded corners... roman numerals at 12 3 6 9... small lines in between"): switched to `g15r_drawRoundBox` for rounded corners, grew the face from 36x36 to 40x40 (`(107,1)-(147,41)`) to fit roman numerals without crowding, added `XII`/`III`/`VI`/`IX` at 12/3/6/9, and 8 small tick marks at the remaining hours.
+3. `G15_TEXT_SMALL` (the built-in bitmap font used for the numerals in pass 2) has no runtime width-query API — each numeral's real pixel width was measured directly (render + scan lit pixels, same technique as the space measurement above): `XII`=11px, `III`=11px, `VI`=7px, `IX`=7px, all 5px tall. Numeral positions were each string's own measured width/2 and height/2 subtracted from its point on a 12px-radius circle.
+4. Further refinement ("JUST A BIT SMALLER"): `G15_TEXT_SMALL` is already the smallest built-in bitmap font this library ships (only SMALL/MED/LARGE/HUGE exist — checked the header, nothing smaller to ask for). Since roman numerals only ever need three shapes (I/V/X), each a trivial straight-line composition, they're now hand-drawn directly with `g15r_drawLine` (`draw_roman_glyph`/`draw_roman_numeral` in the source) at 4px tall instead of rendered from the bitmap font — genuinely smaller (XII: 11px→7px wide, III: 11px→5px, VI/IX: 7px→5px) AND crisper on a 1-bit display than shrinking a bitmap or antialiased glyph would be, since straight strokes don't have half-lit pixels to go muddy at tiny sizes. Centering math now computes the real composed width from the actual glyphs being drawn, not a separately-measured constant.
+
+Tick marks sit at radius 15-18 (clear of the numeral zone, inside the rounded frame). Hand lengths (minute=9, hour=6) were kept under the numeral radius so neither hand ever visually overlaps a numeral, including at :15/:45 and 3:00/9:00. No second hand — deliberately simple at this size.
+
+Same angle convention as everywhere else in this file: 0 = 12 o'clock, increasing clockwise, `dx = round(sin(angle)*len)`, `dy = -round(cos(angle)*len)` (LCD y-axis is down-positive).
+
+Built and self-verified (compiled `-Wall -Wextra` clean, regression suite green, rendered via `--preview` and visually inspected zoomed-in) on branch `g510s-dev` — like everything else on this branch, not tagged/merged to `main` until physically confirmed on the real keyboard.
 
 ## Buttons (L1-L5)
 

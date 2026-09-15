@@ -502,35 +502,113 @@ static void draw_stats_screen(g15canvas *canvas) {
 /* Screen 1: a simple large clock. New screens go here -- L1 cycles
    through however many screens NUM_SCREENS (in g510_lcd_buttons.c)
    currently accounts for. */
-/* Square frame (not a circle) -- direct request: "make it a square
-   ish design to fit the theme", matching this whole display's blocky
-   1-bit aesthetic (every other element on this project is a rect: bars,
-   boxes, the LCD bezel itself) rather than a circle that would need
-   anti-aliasing this display can't really do anyway. Position and size
-   aren't guessed: rendered the real clock screen via --preview and
-   scanned the actual pixel data for the rightmost lit (text) pixel --
-   x=92, leaving a real, measured 67px of empty space (x=93..159)
-   across the full 43px height, not an assumption about font metrics. */
-#define CLOCK_FACE_X1 109
-#define CLOCK_FACE_Y1 3
-#define CLOCK_FACE_X2 145
-#define CLOCK_FACE_Y2 39
+/* Square-ish frame with rounded corners (g15r_drawRoundBox, not a
+   plain pixelBox) -- direct refinement request: "the clock is too
+   rough, i want rounded corners a bit". Position/size still grounded
+   in the real measured empty space (rendered --preview, scanned pixel
+   data: text ends at x=92, so x1=107 leaves a real 15px gap, not
+   guessed) but grown from the first pass's 36x36 to 40x40 -- fitting
+   3-character roman numerals (XII/III measured at 11px wide) AND
+   clearly-separated hands needed more room than the original size
+   had, confirmed by the numeral-position math below actually working
+   out with real margins, not by eyeballing it. */
+#define CLOCK_FACE_X1 107
+#define CLOCK_FACE_Y1 1
+#define CLOCK_FACE_X2 147
+#define CLOCK_FACE_Y2 41
 #define CLOCK_FACE_CX ((CLOCK_FACE_X1 + CLOCK_FACE_X2) / 2)
 #define CLOCK_FACE_CY ((CLOCK_FACE_Y1 + CLOCK_FACE_Y2) / 2)
 
-static void draw_analog_clock(g15canvas *c, struct tm *t) {
-    g15r_pixelBox(c, CLOCK_FACE_X1, CLOCK_FACE_Y1, CLOCK_FACE_X2, CLOCK_FACE_Y2, G15_COLOR_BLACK, 1, 0);
+/* Hand-drawn I/V/X strokes -- direct refinement request: "could we do
+   the roman numerals JUST A BIT SMALLER?". G15_TEXT_SMALL (used for
+   the first pass) is already the smallest built-in bitmap font this
+   library ships (confirmed: only SMALL/MED/LARGE/HUGE exist, checked
+   the header) -- there's no smaller size to ask it for. Roman
+   numerals only ever need three shapes (I/V/X), each a trivial
+   straight-line composition, so drawing them directly with
+   g15r_drawLine at a chosen size is both smaller AND crisper on a
+   1-bit display than shrinking a bitmap or antialiased TTF glyph
+   would be (no half-lit pixels to go muddy at tiny sizes). */
+#define ROMAN_GLYPH_H 4
 
-    /* Angle 0 = 12 o'clock, increasing clockwise -- standard clock-face
-       convention. Hand length kept well inside the half-side (18px) so
-       neither hand can ever poke through the square frame, including
-       at the diagonal quadrants where a hand's own (dx,dy) can both be
-       near-maximal at once. No second hand -- kept deliberately simple
-       on a square this small, matches "square-ish" over "busy". */
+static int roman_glyph_width(char ch) {
+    return (ch == 'I') ? 1 : 3;
+}
+
+static void draw_roman_glyph(g15canvas *c, char ch, int x, int y) {
+    switch (ch) {
+        case 'I':
+            g15r_drawLine(c, x, y, x, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+        case 'V':
+            g15r_drawLine(c, x, y, x + 1, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            g15r_drawLine(c, x + 2, y, x + 1, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+        case 'X':
+            g15r_drawLine(c, x, y, x + 2, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            g15r_drawLine(c, x + 2, y, x, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+    }
+}
+
+/* cx/cy = the numeral's own center point (same 12px-radius circle
+   used before) -- computes the real composed width from the actual
+   glyphs being drawn (1px gap between characters) so it's centered
+   exactly, not approximated. */
+static void draw_roman_numeral(g15canvas *c, const char *s, int cx, int cy) {
+    int len = (int)strlen(s);
+    int w = 0;
+    for (int i = 0; i < len; i++) {
+        w += roman_glyph_width(s[i]);
+        if (i < len - 1) w += 1;
+    }
+    int x = cx - w / 2;
+    int y = cy - ROMAN_GLYPH_H / 2;
+    for (int i = 0; i < len; i++) {
+        draw_roman_glyph(c, s[i], x, y);
+        x += roman_glyph_width(s[i]) + 1;
+    }
+}
+
+static void draw_analog_clock(g15canvas *c, struct tm *t) {
+    g15r_drawRoundBox(c, CLOCK_FACE_X1, CLOCK_FACE_Y1, CLOCK_FACE_X2, CLOCK_FACE_Y2, 0, G15_COLOR_BLACK);
+
+    /* Roman numerals at 12/3/6/9 -- direct request: "some roman
+       numerals at 12 3 6 9 oclock", later refined ("JUST A BIT
+       SMALLER") to these hand-drawn I/V/X strokes -- see
+       draw_roman_numeral above. Each numeral is centered on its own
+       point on the same 12px-radius circle used since the first pass. */
+    draw_roman_numeral(c, "XII", CLOCK_FACE_CX, CLOCK_FACE_CY - 12);
+    draw_roman_numeral(c, "III", CLOCK_FACE_CX + 12, CLOCK_FACE_CY);
+    draw_roman_numeral(c, "VI",  CLOCK_FACE_CX, CLOCK_FACE_CY + 12);
+    draw_roman_numeral(c, "IX",  CLOCK_FACE_CX - 12, CLOCK_FACE_CY);
+
+    /* Small tick marks at the other 8 hours -- direct request: "with
+       small lines in between". Same angle convention as the hands
+       (0 = 12 o'clock, clockwise), radius 15-18 -- inside the rounded
+       frame (half-side 20) but clear of the numeral zone (numeral
+       centers sit at radius 12, half-height ~2.5, so nothing there
+       extends past radius ~15). Skips hours 12/3/6/9 -- already
+       labeled with numerals, a tick there would just clutter them. */
+    for (int hour = 1; hour <= 12; hour++) {
+        if (hour == 12 || hour == 3 || hour == 6 || hour == 9) continue;
+        double angle = (hour / 12.0) * 2 * M_PI;
+        int x1 = CLOCK_FACE_CX + (int)round(sin(angle) * 15);
+        int y1 = CLOCK_FACE_CY - (int)round(cos(angle) * 15);
+        int x2 = CLOCK_FACE_CX + (int)round(sin(angle) * 18);
+        int y2 = CLOCK_FACE_CY - (int)round(cos(angle) * 18);
+        g15r_drawLine(c, x1, y1, x2, y2, G15_COLOR_BLACK);
+    }
+
+    /* Hands -- lengths kept clearly under the numeral radius (12) so
+       neither hand ever visually overlaps a numeral, including at
+       :15/:45 (minute hand pointing exactly at III/IX) or 3:00/9:00
+       (hour hand pointing exactly at III/IX). No second hand --
+       deliberately simple on a square this small. */
     double minute_angle = (t->tm_min / 60.0) * 2 * M_PI;
     double hour_angle = ((t->tm_hour % 12) + t->tm_min / 60.0) / 12.0 * 2 * M_PI;
 
-    int minute_len = 15, hour_len = 10;
+    int minute_len = 9, hour_len = 6;
     int mx = CLOCK_FACE_CX + (int)round(sin(minute_angle) * minute_len);
     int my = CLOCK_FACE_CY - (int)round(cos(minute_angle) * minute_len);
     int hx = CLOCK_FACE_CX + (int)round(sin(hour_angle) * hour_len);
