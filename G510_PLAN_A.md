@@ -200,6 +200,20 @@ keyboard. Treating this as its own careful sub-phase, with the same
 build-verify-confirm discipline as everything else in this plan, once
 Phase 0 is actually done and this phase is really started.
 
+**Real reference now exists on `main`** (2026-09-15, `177ebee`): the
+G910 side actually built and locally installed a real PKGBUILD
+(`packaging/g910-control/`) — verified against `solaar`'s real
+installed layout, built+installed for real via `makepkg`/`pacman -U`,
+found and fixed two more real bugs doing it (a version mismatch, a
+leftover personal identifier in a comment inside the built artifact
+itself, not just the source tree). Same `sha256sums=SKIP`-for-now /
+private-repo-blocks-real-submission situation as this phase. Worth
+reading before starting the PROJECT_DIR migration above — G510s has
+compiled C binaries G910 doesn't, so the layout won't copy over
+directly, but the package-structure pattern (`packaging/<pkgname>/`,
+verified against a real installed reference package, built+installed
+for real rather than just written) is exactly the bar to match.
+
 Still a stretch goal, still not blocking anything in Phases 0-3.
 
 ## Why this order
