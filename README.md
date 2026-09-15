@@ -35,8 +35,8 @@ replugs, and kernel updates. Does what it says on the tin.
 
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
-| **G510s** | `main` (`v1.0`) / **`g510s-dev`** (active work) | **Work in progress** — `main` has the tagged, confirmed `v1.0` (LCD stats, backlight, G-key macros). Everything since — the Custom Screens dashboard builder for L2-L5 (drag sensors and PNG images onto a live preview), the canvas rework, and a real Arch package (`packaging/g510-lcd/`) — is built and self-tested on `g510s-dev`, not merged here yet. Your own screens/macros/images live under `~/.local/share/g510-lcd`, independent of wherever the app itself is installed from. Nothing on `g510s-dev` gets tagged or merged until it's physically confirmed on the real keyboard — that's this project's standing rule, not a delay. |
-| **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. A compact colour picker (real named presets + a hex field, no fiddly gradient square) sits alongside saving/loading whole lighting setups (any number of them, scrolls properly). Device paths are discovered at runtime by matching the actual hardware (vendor/product ID), not a hardcoded path tied to one specific physical keyboard — works on any G910, not just the one it was built on. Comes with its own installer and desktop shortcut, plus a real Arch package (`packaging/g910-control/`) as a second, from-scratch-packaged way to install it. Tagged `g910-v1.2`. Further G910 work happens on the `g910` branch. |
+| **G510s** | `main` (`v1.0`) / **`g510s-dev`** (active work) | **Work in progress** — `main` has the tagged, confirmed `v1.0` (LCD stats, backlight, G-key macros). Everything since has been built and self-tested (including several rounds of self-audit bug-fixing) on `g510s-dev`, not merged here yet: the Custom Screens dashboard builder for L2-L5 (drag sensors, PNG images, and freeform text onto a live preview, resizable images, per-element text sizing), a live analog clock on L1, the Backlight + G-Keys canvas rearchitecture, a real Arch package (`packaging/g510-lcd/`), and a full split of your own data (screens/macros/images) into `~/.local/share/g510-lcd`, independent of wherever the app itself is installed from. Nothing on `g510s-dev` gets tagged or merged until it's physically confirmed on the real keyboard — that's this project's standing rule, not a delay. |
+| **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. A compact colour picker (real named presets + a hex field, no fiddly gradient square) sits alongside saving/loading whole lighting setups (any number of them, scrolls properly). Device paths are discovered at runtime by matching the actual hardware (vendor/product ID), not a hardcoded path tied to one specific physical keyboard — works on any G910, not just the one it was built on. Comes with its own installer and desktop shortcut, plus a real Arch package (`packaging/g910-control/`) as a second, from-scratch-packaged way to install it. Tagged `g910-v1.2`. Further G910 work happens on the `g910` branch — see [`G910: the short version`](#g910-the-short-version) below for the deep-dive docs. |
 
 ### Screenshots
 
@@ -110,17 +110,36 @@ covers that directly.
 
 ---
 
+## G910: the short version
+
+A PyQt5 app (`g910_app.py`) built around a real on-screen render of the
+keyboard (`g910_canvas.py`) — click any key to colour it, drag-select a
+whole area, or use the Colour Mode sidebar to bulk-colour a named zone
+(Logo, G-Keys, F-row, Numpad, Nav Cluster, Main Board). G-key macros
+across M1-M3 profiles, and any number of saved full-lighting Profiles.
+Talks to the keyboard via `keyledsctl`/`libkeyleds.so` over its real
+HID++ 2.0 protocol, with device paths discovered at runtime instead of
+tied to one physical unit. Runs as a systemd `--user` service for macro
+playback, starts itself at login. Tagged `g910-v1.2`.
+
+Want the full story — the HID++ protocol reverse-engineering, every
+real bug hit along the way, the canvas rearchitecture from a plain
+button grid to real per-key geometry? [`G910_CANVAS_PLAN.md`](G910_CANVAS_PLAN.md)
+is the detailed, still-updated build log. [`G910_README.md`](G910_README.md)
+and [`G910_SKELETON.md`](G910_SKELETON.md) are the earlier research/
+planning and first-skeleton write-ups that led there.
+
+---
+
 ## The cheeky bits
 
 A few things that happened along the way worth a mention, because
 they're the kind of detail that makes a "personal project" actually
 personal:
 
-- The G510s app can show free space on a drive over its LCD like any
-  other sensor — except this one's internal name is literally "the
-  fridge" (`frigider`), because that's what the drive is actually
-  called on this machine. Fully optional, shows "N/A" gracefully on
-  any setup that isn't ours.
+- The G510s app can show free space on a second drive over its LCD
+  like any other sensor, on request — fully optional, shows "N/A"
+  gracefully on any setup that doesn't have one.
 - Two separate Claude Code sessions ran this whole build, one per
   keyboard, each on its own machine, coordinating over actual messages
   to each other — catching each other's mistakes (a compile-time path

@@ -582,7 +582,7 @@ SENSOR_CHOICES = [
     ("GPU_VRAM_TEMP", "GPU VRAM Temp"),
     ("SWAP_PCT", "Swap %"),
     ("DISK_ROOT_PCT", "Disk % (root)"),
-    ("DISK_FRIGIDER_PCT", "Disk % (frigider)"),
+    ("DISK_SECONDARY_PCT", "Disk % (secondary)"),
     ("UPTIME", "Uptime"),
     ("NET_DOWN", "Network Download Speed"),
     ("NET_UP", "Network Upload Speed"),
@@ -605,9 +605,18 @@ SENSOR_LABELS = dict(SENSOR_CHOICES)
 BAR_CAPABLE_SENSORS = {
     "CPU_PCT", "CPU_TEMP", "RAM_PCT", "VRAM_PCT", "MAXTEMP",
     "GPU_PCT", "GPU_EDGE_TEMP", "GPU_HOTSPOT_TEMP", "GPU_VRAM_TEMP",
-    "SWAP_PCT", "DISK_ROOT_PCT", "DISK_FRIGIDER_PCT",
+    "SWAP_PCT", "DISK_ROOT_PCT", "DISK_SECONDARY_PCT",
     "MB_TEMP1", "MB_TEMP2", "MB_TEMP3", "MB_TEMP4", "MB_TEMP5", "MB_TEMP6",
 }
+
+# Renamed from DISK_FRIGIDER_PCT (a personal nickname for one specific
+# drive) to a generic name -- this alias means an existing
+# custom_screens.txt element saved under the old key still loads and
+# renders correctly instead of silently disappearing; the very next
+# auto-save (this app saves on every edit, no separate Save button)
+# rewrites it under the new key, a one-time silent migration, same
+# pattern as this project's other old-path/old-key migrations.
+LEGACY_SENSOR_ALIASES = {"DISK_FRIGIDER_PCT": "DISK_SECONDARY_PCT"}
 
 CUSTOM_SCREEN_KEYS = ["L2", "L3", "L4", "L5"]
 # L1 is the built-in clock screen (drawn by draw_clock_screen() in C,
@@ -650,6 +659,7 @@ def load_custom_screens():
                 elif k in ("sensor", "style"):
                     el[k] = v
             if el["sensor"]:
+                el["sensor"] = LEGACY_SENSOR_ALIASES.get(el["sensor"], el["sensor"])
                 config[current].append(el)
         elif line.startswith("IMAGE ") and current:
             im = {"kind": "image", "path": "", "x": 0, "y": 0, "width": 0, "height": 0}

@@ -11,11 +11,11 @@ solid, what's still a known gap.
 ## Two machines, two keyboards
 
 This repo is worked on from two machines, each with only one of the two
-keyboards physically attached: AC130arch has the G910, AC130Tria has the
+keyboards physically attached: one machine has the G910, the other has the
 G510s. Each machine's session should only be doing active development on
 the branch for the keyboard it actually has -- don't start G510s work
-from AC130arch or vice versa, since neither side can test on the real
-hardware for the other keyboard.
+from the G910 machine or vice versa, since neither side can test on the
+real hardware for the other keyboard.
 
 ## Active branches
 
@@ -26,13 +26,13 @@ hardware for the other keyboard.
   file the G910 side differed on was untouched by G910 development
   (pure drift from G510s's own later history), so the merge was
   clean with no real conflict resolution needed. Also carries the
-  Custom Screens image-import feature merged in from AC130Tria the
+  Custom Screens image-import feature merged in from the G510s machine the
   same day.
-- **`g510s-dev`** -- active G510s development, driven from AC130Tria
-  (the machine with that keyboard). This is the canonical branch for
+- **`g510s-dev`** -- active G510s development, driven from the G510s
+  machine (the one with that keyboard). This is the canonical branch for
   ongoing G510s work; merges back into `main` when a feature is done.
-- **`g910`** -- active G910 development, driven from AC130arch (this
-  machine). Used to point at an older, pre-canvas-rewrite snapshot;
+- **`g910`** -- active G910 development, driven from the G910 machine.
+  Used to point at an older, pre-canvas-rewrite snapshot;
   fast-forwarded on 2026-09-14 to match `g910-canvas`'s tip (a real
   fast-forward, nothing rewritten or deleted -- the old commit it used
   to point at is still reachable as an ancestor of `g910-canvas`, and
@@ -41,8 +41,8 @@ hardware for the other keyboard.
 
 ## Historical / frozen branches (kept for reference, not deleted)
 
-- **`g510s`** -- a local-only branch created on AC130arch on
-  2026-09-14 before realizing this machine doesn't have a G510s to
+- **`g510s`** -- a local-only branch created on the G910 machine on
+  2026-09-14 before realizing that machine doesn't have a G510s to
   develop against -- `g510s-dev` (above) is the real one. Left in
   place, unpushed, per the no-delete rule; not used going forward.
 - **`g910-canvas`** -- the full blow-by-blow G910 development history:

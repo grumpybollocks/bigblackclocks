@@ -19,3 +19,11 @@ custom_screen_images/*.bin
 # leftovers and are no longer read/written by the app.
 g910_profiles.json
 g910_macros.json
+
+# G510s runtime state -- your own live LCD layout and recorded macros,
+# not part of the project itself. g510s-dev has already moved this to
+# ~/.local/share/g510-lcd (same reasoning as the G910 entries above);
+# this branch hasn't picked that code change up yet, but there's no
+# reason to keep tracking the data itself in the meantime.
+custom_screens.txt
+macros.json

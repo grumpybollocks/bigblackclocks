@@ -192,8 +192,8 @@ static double get_swap_percent(void) {
     return 100.0 * (swap_total - swap_free) / swap_total;
 }
 
-/* Returns -1 if the path isn't mounted right now (e.g. removable "frigider"
-   drive unplugged) instead of guessing or crashing. */
+/* Returns -1 if the path isn't mounted right now (e.g. a removable
+   secondary drive unplugged) instead of guessing or crashing. */
 static double get_disk_percent(const char *path) {
     struct statvfs st;
     if (statvfs(path, &st) != 0) return -1;
@@ -296,13 +296,26 @@ static g15font *label_font = NULL;
 #define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
 #define CUSTOM_SCREENS_PATH PROJECT_DIR "/custom_screens.txt"
 
-/* This one's tied to an actual mounted drive on the machine this was
-   built for, not just a username baked in for no reason -- there's no
-   portable "right" answer to substitute. EDIT THIS for your own setup
-   if the DISK_FRIGIDER_PCT sensor matters to you (or just don't use
-   that sensor -- it already handles the path not existing by showing
-   "N/A" rather than crashing). */
-#define DISK_FRIGIDER_PATH "/run/media/alextria/frigider"
+/* An optional removable secondary drive, auto-mounted by udisks2 at
+   the standard /run/media/$USER/<label> convention -- <label> is
+   whatever the drive's own real filesystem volume label is, which
+   this code has no control over (it's a fact about the physical
+   disk, not a choice made here). Built at runtime from $USER rather
+   than baked in at compile time (same reasoning as PROJECT_DIR
+   above), so this file doesn't hardcode a username. On a machine
+   without this exact drive, get_disk_percent() already handles the
+   path not existing by showing "N/A" rather than crashing. EDIT THE
+   LABEL BELOW to match your own drive's real volume label if you want
+   the DISK_SECONDARY_PCT sensor to point at it, or just don't use
+   that sensor. */
+#define SECONDARY_DISK_LABEL "frigider"
+
+static const char *disk_secondary_path(void) {
+    static char path[256];
+    const char *user = getenv("USER");
+    snprintf(path, sizeof(path), "/run/media/%s/" SECONDARY_DISK_LABEL, user ? user : "nobody");
+    return path;
+}
 
 static void draw_row(g15canvas *c, int y, const char *label, int pct,
                       const char *pct_str, const char *amount, int pct_y_nudge) {
@@ -406,7 +419,7 @@ static const sensor_def_t SENSORS[] = {
     {"GPU_VRAM_TEMP",    "VMEM", 0, 1},
     {"SWAP_PCT",         "SWAP", 1, 0},
     {"DISK_ROOT_PCT",    "DISK", 1, 0},
-    {"DISK_FRIGIDER_PCT","FRIG", 1, 0},
+    {"DISK_SECONDARY_PCT","DSK2", 1, 0},
     {"UPTIME",           "UPTM", 0, 0},
     {"NET_DOWN",         "DOWN", 0, 0},
     {"NET_UP",           "UPLD", 0, 0},
@@ -484,8 +497,8 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
         double v = get_disk_percent("/");
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
-    } else if (strcmp(key, "DISK_FRIGIDER_PCT") == 0) {
-        double v = get_disk_percent(DISK_FRIGIDER_PATH);
+    } else if (strcmp(key, "DISK_SECONDARY_PCT") == 0) {
+        double v = get_disk_percent(disk_secondary_path());
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
     } else if (strcmp(key, "UPTIME") == 0) {
@@ -582,6 +595,18 @@ static void load_custom_screens(void) {
                     else if (strcmp(key, "width") == 0) el->width = atoi(val);
                 }
                 tok = strtok(NULL, " ");
+            }
+            /* DISK_FRIGIDER_PCT was renamed to DISK_SECONDARY_PCT (a
+               personal drive nickname replaced with a generic name) --
+               this alias means an existing custom_screens.txt saved
+               under the old key still loads and renders correctly
+               instead of the element silently vanishing. The GUI's own
+               save path performs the equivalent Python-side migration
+               and rewrites the file under the new key on the next
+               edit; this is the read-side half of that same migration. */
+            if (strcmp(el->sensor, "DISK_FRIGIDER_PCT") == 0) {
+                strncpy(el->sensor, "DISK_SECONDARY_PCT", sizeof(el->sensor) - 1);
+                el->sensor[sizeof(el->sensor) - 1] = 0;
             }
             if (el->sensor[0]) cs->count++;
         } else if (strncmp(line, "IMAGE ", 6) == 0 && current >= 0) {
