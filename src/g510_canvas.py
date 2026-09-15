@@ -94,8 +94,19 @@ MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 # "bigger" attempt (height=1.2) was still constrained by the M-key
 # row's slot and came out *smaller* than the real LCD's native 160x43
 # once scaled into that box. This size renders at ~2.2x native scale.
+#
+# height=2.77 (not a round number, deliberately) -- at width=10 the
+# cell's own pixel aspect ratio was 356/93.2=3.82, slightly wider than
+# the real LCD's 160/43=3.72, so KeepAspectRatio letterboxed a few
+# pixels on the sides even though the content filled the full height
+# ("make it a few more pixels tall so it fills the whole space" --
+# taller, not wider, was the right fix specifically because height
+# was already the constraining/fully-filled dimension). Solved
+# directly for the height that makes the cell's own ratio match
+# 160/43 exactly at this width: (356 / (160/43) + 4) / 36 = 2.7688,
+# rounded to 2.77 -- not eyeballed.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -2.95, 5.1, width=10.0, height=2.7, kind="lcd"),
+    Cell("_LCD", "LCD", -2.95, 5.1, width=10.0, height=2.77, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
