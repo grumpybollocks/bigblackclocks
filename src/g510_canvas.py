@@ -113,17 +113,17 @@ MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 # 160/43 exactly at this width: (356 / (160/43) + 4) / 36 = 2.7688,
 # rounded to 2.77 -- not eyeballed.
 #
-# row=-3.10 (was -2.95): the top gap to the canvas edge is always
-# exactly PADDING_PX regardless of this cell's own row (see
-# PADDING_PX's comment above), so the only way to grow the BOTTOM gap
-# to match the new PADDING_PX=16 is moving this cell further up.
-# Solved empirically against the real _cell_rect() math (a first
-# hand-derived formula was off by exactly GUTTER_PX, caught by
-# actually measuring rather than trusting the arithmetic) -- row=-3.10
-# measures top=16.00px, bottom=15.88px, a 0.12px difference that isn't
-# a real one.
+# row: the top gap to the canvas edge is always exactly PADDING_PX
+# regardless of this cell's own row (see PADDING_PX's comment above),
+# so this row value only ever controls the BOTTOM gap (distance to the
+# main board below). Was -3.10 (measured top=16.00px, bottom=15.88px,
+# a genuinely symmetrical pair) -- moved further up to -3.60 on direct
+# request for visibly more separation from the keyboard specifically,
+# no longer aiming for top==bottom equality this time. Adds ~18px more
+# bottom gap (0.5 row units * 36px/unit); top gap is unaffected by
+# construction, still exactly PADDING_PX.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -3.10, 5.1, width=10.0, height=2.77, kind="lcd"),
+    Cell("_LCD", "LCD", -3.60, 5.1, width=10.0, height=2.77, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910

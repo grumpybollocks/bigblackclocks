@@ -138,6 +138,24 @@ QPushButton#Primary:hover {
     background-color: #4a7cd4;
     border-color: #6a9cf0;
 }
+QPushButton#PanelPrimary {
+    background-color: #3a6cc4;
+    border-color: #5a8ce0;
+    color: white;
+    text-align: center;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+QPushButton#PanelPrimary:hover {
+    background-color: #4a7cd4;
+    border-color: #6a9cf0;
+}
+QPushButton#PanelButton {
+    font-size: 11px;
+    padding: 4px 8px;
+    text-align: center;
+}
 QLabel#Title {
     font-size: 15px;
     font-weight: 600;
@@ -554,7 +572,7 @@ class KeyboardTab(QWidget):
         self.hex_edit.setPlaceholderText("8000ff")
         self.hex_edit.returnPressed.connect(self.on_apply_hex)
         hex_apply_btn = QPushButton("Apply")
-        hex_apply_btn.setObjectName("Primary")
+        hex_apply_btn.setObjectName("PanelPrimary")
         hex_apply_btn.clicked.connect(self.on_apply_hex)
         hex_row.addWidget(self.hex_edit)
         hex_row.addWidget(hex_apply_btn)
@@ -582,10 +600,11 @@ class KeyboardTab(QWidget):
         panel_layout.addSpacing(4)
 
         apply_btn = QPushButton("Apply")
-        apply_btn.setObjectName("Primary")
+        apply_btn.setObjectName("PanelPrimary")
         apply_btn.clicked.connect(self.on_apply)
         panel_layout.addWidget(apply_btn)
         set_default_btn = QPushButton("Set as Default")
+        set_default_btn.setObjectName("PanelButton")
         set_default_btn.clicked.connect(self.on_set_as_default)
         panel_layout.addWidget(set_default_btn)
 
@@ -1445,12 +1464,17 @@ class CustomScreensTab(QWidget):
         self.refresh_elements_list()
 
     def on_drag_started(self):
+        # Pause the 1s idle timer while the 120ms drag timer takes
+        # over -- both ultimately call the same refresh_preview(),
+        # writing to the same file; no reason to run both at once.
+        self.preview_timer.stop()
         self.drag_refresh_timer.start(120)
 
     def on_drag_finished(self):
         self.drag_refresh_timer.stop()
         save_custom_screens(self.config)
         self.refresh_preview()  # one final, accurate, untimed refresh
+        self.preview_timer.start(1000)
 
     def refresh_elements_list(self):
         # Clear everything including the trailing stretch, then rebuild

@@ -64,7 +64,20 @@ static void send_frame(g15canvas *canvas) {
    what the real LCD would show, using the identical drawing code path.
    Colors are tinted to evoke the real G510's green-on-black panel. */
 static void write_ppm(g15canvas *c, const char *path) {
-    FILE *f = fopen(path, "wb");
+    /* Written to path+".tmp" then rename()'d into place atomically --
+       a real screenshot caught the reader side (render_preview() in
+       g510_app.py) showing two different frames' content visibly
+       overlapping in one image, exactly what a torn read of a
+       direct in-place fopen(path,"wb") can produce if a reader opens
+       the file mid-write. rename() on POSIX is atomic when source and
+       destination share a filesystem (always true here, both under
+       the same /tmp path a caller passed in), so any concurrent
+       reader sees either the complete old file or the complete new
+       one, never a mix -- true regardless of exactly what triggers
+       the overlap, which wasn't fully pinned down. */
+    char tmp_path[300];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) { perror("open preview output"); return; }
     fprintf(f, "P6\n%d %d\n255\n", G15_LCD_WIDTH, G15_LCD_HEIGHT);
     for (int y = 0; y < G15_LCD_HEIGHT; y++) {
@@ -77,6 +90,7 @@ static void write_ppm(g15canvas *c, const char *path) {
         }
     }
     fclose(f);
+    rename(tmp_path, path);
 }
 
 /* --- stat readers --- */
@@ -790,9 +804,14 @@ static void draw_element(g15canvas *c, element_t *el) {
    per element in the same order load_custom_screens() produced them
    (matches the GUI's own element list index-for-index). */
 static void write_bounds_meta(const char *outpath) {
-    char meta_path[300];
+    /* Same atomic tmp+rename() pattern as write_ppm() above, same
+       reasoning -- a stale/mismatched .meta read wouldn't show visible
+       image corruption, just wrong hit-testing, but it's the same
+       class of torn-read risk against the same reader. */
+    char meta_path[300], tmp_path[310];
     snprintf(meta_path, sizeof(meta_path), "%s.meta", outpath);
-    FILE *f = fopen(meta_path, "w");
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", meta_path);
+    FILE *f = fopen(tmp_path, "w");
     if (!f) return;
     for (int i = 0; i < g_element_bounds_count; i++) {
         element_bounds_t *b = &g_element_bounds[i];
@@ -806,6 +825,7 @@ static void write_bounds_meta(const char *outpath) {
         }
     }
     fclose(f);
+    rename(tmp_path, meta_path);
 }
 
 /* Loads a converted 1bpp image (see src/png-to-lcd.py) and draws it via
