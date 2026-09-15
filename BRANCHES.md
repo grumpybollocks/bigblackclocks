@@ -60,6 +60,14 @@ hardware for the other keyboard.
 - `g910-v1.1` -- G910 phase 1 wrap-up: Profiles panel overflow fix,
   GUI-daemon profile desync fix, gold-border assigned-key indicator,
   manual hex colour entry. Merged into `main`.
+- `g910-v1.2` -- colour-picker rebuild (real named presets + hex,
+  native QColorDialog fully removed from both the sidebar and the
+  canvas's own drag-select path), device paths now discovered
+  dynamically instead of hardcoded to one physical keyboard's USB
+  serial, profiles/macros moved to `$XDG_DATA_HOME/g910-control`, and
+  a real Arch package (`packaging/g910-control/`) built and verified
+  locally alongside the existing git-clone installer. Merged into
+  `main`.
 - `g910-gui-v1` -- G910 reaching a single unified canvas-based GUI.
 - `g910-skeleton-v1-buttongrid` -- G910's pre-canvas button-grid UI,
   permanent record before the canvas rearchitecture.
