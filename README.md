@@ -29,7 +29,7 @@ replugs, and kernel updates. Does what it says on the tin.
 
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
-| **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons — drag sensors and images straight onto a live preview instead of typing coordinates — does the RGB backlight through a proper on-screen render of the keyboard (click a G-key to record a macro, M1/M2/M3/MR are real clickable bits of the picture), and handles G-key macros across M1-M3 profiles. Tagged `v1.0`; the Custom Screens editor and canvas rework keep actively improving on `g510s-dev`. |
+| **G510s** | `main` (this branch) | Lights up the LCD with live CPU/RAM/VRAM/temps, lets you build your own custom dashboards for the L2-L5 buttons — drag sensors and PNG images straight onto a live preview instead of typing coordinates — does the RGB backlight through a proper on-screen render of the keyboard (click a G-key to record a macro, M1/M2/M3/MR are real clickable bits of the picture), and handles G-key macros across M1-M3 profiles. Your own screens/macros/images live under `~/.local/share/g510-lcd`, independent of wherever the app itself is installed from — the same split a real package needs, migrated automatically from older installs. Comes with its own installer, plus a real Arch package (`packaging/g510-lcd/`) as a second way to install it. Tagged `v1.0`; everything since (Custom Screens, the canvas rework, the packaging split) is built and self-tested on `g510s-dev`, not yet tagged — same rule as always, nothing's "done" until it's physically confirmed on the real keyboard. |
 | **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. A compact colour picker (real named presets + a hex field, no fiddly gradient square) sits alongside saving/loading whole lighting setups (any number of them, scrolls properly). Device paths are discovered at runtime by matching the actual hardware (vendor/product ID), not a hardcoded path tied to one specific physical keyboard — works on any G910, not just the one it was built on. Comes with its own installer and desktop shortcut, plus a real Arch package (`packaging/g910-control/`) as a second, from-scratch-packaged way to install it. Tagged `g910-v1.2`. Further G910 work happens on the `g910` branch. |
 
 ### Screenshots
@@ -65,12 +65,16 @@ Want to actually run the G510s app? `./install.sh` sorts out every
 dependency, drops the system files where they need to go, builds
 everything, and switches the services on — the one thing it can't do
 for you is track down your own copy of the Eurostile Bold font (that's
-a licensing thing, not a laziness thing). The G910 app's got its own
-installer, `install-g910.sh`, right here on `main` — or, if you'd
-rather install it the "real package" way, `packaging/g910-control/`
-has a PKGBUILD that builds and installs it via `makepkg`/`pacman`
-instead (not yet on the AUR itself, but builds and runs identically
-either way — see that folder's own README for the details).
+a licensing thing, not a laziness thing). A real Arch package also
+exists (`packaging/g510-lcd/` on `g510s-dev`) — built and its contents
+verified via `makepkg`, not yet actually installed on real hardware
+(that's a manual `sudo pacman -U` step away, deliberately not run
+automatically). The G910 app's got its own installer,
+`install-g910.sh`, right here on `main` — or, if you'd rather install
+it the "real package" way, `packaging/g910-control/` has a PKGBUILD
+that builds and installs it via `makepkg`/`pacman` instead (not yet on
+the AUR itself, but builds and runs identically either way — see that
+folder's own README for the details).
 
 ---
 
