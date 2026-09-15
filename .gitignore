@@ -13,3 +13,6 @@ fonts/*.fnt
 
 # Generated at runtime, not part of the project itself
 custom_screen_images/*.bin
+
+# Claude Code's own worktree bookkeeping -- not project content
+.claude/
