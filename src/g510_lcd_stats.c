@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 /* Exact port of libg15's dumpPixmapIntoLCDFormat(): converts libg15render's
    row-major MSB-first bitmap into the LCD's vertical "page" wire format. */
@@ -294,7 +296,95 @@ static g15font *label_font = NULL;
 #error "PROJECT_DIR not defined -- compile via install.sh or scripts/rebuild.sh, or pass -DPROJECT_DIR='\"/your/checkout/path\"' yourself"
 #endif
 #define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
-#define CUSTOM_SCREENS_PATH PROJECT_DIR "/custom_screens.txt"
+
+/* Your own custom-screens config and imported images live under
+   ~/.local/share/g510-lcd, independent of where the program itself is
+   installed from (a dev checkout via install.sh, or a real package
+   under a fixed /usr/lib/g510-lcd) -- so a package upgrade (root-owned,
+   read-only /usr/lib) never touches what you've actually configured.
+   Mirrors button_log_path() in g510_lcd_buttons.c. On first run after
+   upgrading from a version that stored these directly under
+   PROJECT_DIR, migrate the old files over once rather than silently
+   showing "not configured" on a screen that was actually already set
+   up -- migrate_file_if_needed()/migrate_dir_if_needed() are no-ops
+   whenever there's nothing old to migrate (a real package install,
+   or a dev checkout that's already been migrated once). */
+/* Plain mkdir() only creates one level -- ~/.local/share doesn't
+   necessarily exist yet on every system (confirmed the hard way: an
+   isolated test with a fresh, empty $HOME silently failed to create
+   ~/.local/share/g510-lcd because mkdir() can't create the missing
+   ~/.local and ~/.local/share parents in one call). Walks the path
+   one "/"-separated component at a time, creating each as needed. */
+static void mkdir_p(const char *path) {
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+
+static void migrate_file_if_needed(const char *old_path, const char *new_path) {
+    FILE *already = fopen(new_path, "r");
+    if (already) { fclose(already); return; }
+    FILE *src = fopen(old_path, "r");
+    if (!src) return;
+    FILE *dst = fopen(new_path, "w");
+    if (!dst) { fclose(src); return; }
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) fwrite(buf, 1, n, dst);
+    fclose(src);
+    fclose(dst);
+}
+
+static void migrate_dir_if_needed(const char *old_dir, const char *new_dir) {
+    DIR *d = opendir(old_dir);
+    if (!d) return;
+    mkdir_p(new_dir);
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        char old_path[512], new_path[512];
+        snprintf(old_path, sizeof(old_path), "%s/%s", old_dir, entry->d_name);
+        snprintf(new_path, sizeof(new_path), "%s/%s", new_dir, entry->d_name);
+        migrate_file_if_needed(old_path, new_path);
+    }
+    closedir(d);
+}
+
+static const char *data_dir(void) {
+    static char dir[200];
+    static int ready = 0;
+    if (!ready) {
+        const char *home = getenv("HOME");
+        snprintf(dir, sizeof(dir), "%s/.local/share/g510-lcd", home ? home : "/tmp");
+        mkdir_p(dir);
+
+        char old_screens[256], new_screens[256];
+        snprintf(old_screens, sizeof(old_screens), "%s/custom_screens.txt", PROJECT_DIR);
+        snprintf(new_screens, sizeof(new_screens), "%s/custom_screens.txt", dir);
+        migrate_file_if_needed(old_screens, new_screens);
+
+        char old_images[256], new_images[256];
+        snprintf(old_images, sizeof(old_images), "%s/custom_screen_images", PROJECT_DIR);
+        snprintf(new_images, sizeof(new_images), "%s/custom_screen_images", dir);
+        migrate_dir_if_needed(old_images, new_images);
+
+        ready = 1;
+    }
+    return dir;
+}
+
+static const char *custom_screens_path(void) {
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/custom_screens.txt", data_dir());
+    return path;
+}
 
 /* A drive labeled "frigider", auto-mounted by udisks2 at the standard
    /run/media/$USER/<label> convention -- inherently tied to one
@@ -537,7 +627,7 @@ typedef struct {
    image's own aspect ratio; only position (x, y) is editable, via the
    same drag mechanic as sensor elements. */
 typedef struct {
-    char path[128]; /* relative to PROJECT_DIR, e.g. "custom_screen_images/logo.bin" */
+    char path[128]; /* relative to data_dir(), e.g. "custom_screen_images/logo.bin" */
     int x, y, width, height;
 } image_t;
 
@@ -558,7 +648,7 @@ static void load_custom_screens(void) {
         custom_screens[i].count = 0;
         custom_screens[i].image_count = 0;
     }
-    FILE *f = fopen(CUSTOM_SCREENS_PATH, "r");
+    FILE *f = fopen(custom_screens_path(), "r");
     if (!f) return;
     char line[256];
     int current = -1;
@@ -707,7 +797,7 @@ static void write_bounds_meta(const char *outpath) {
    rather than crashing the whole screen over one missing image. */
 static void draw_image_element(g15canvas *c, image_t *im) {
     char full_path[300];
-    snprintf(full_path, sizeof(full_path), "%s/%s", PROJECT_DIR, im->path);
+    snprintf(full_path, sizeof(full_path), "%s/%s", data_dir(), im->path);
     FILE *f = fopen(full_path, "rb");
     if (!f) return;
     long expected = (long)((im->width + 7) / 8) * im->height;

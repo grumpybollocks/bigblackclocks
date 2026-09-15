@@ -32,10 +32,43 @@ import g510_canvas
 PROJECT_DIR = Path(__file__).resolve().parent.parent  # repo root (this file lives in src/)
 LED_DIR = Path("/sys/class/leds/g15::kbd_backlight")
 DEFAULTS_SCRIPT = PROJECT_DIR / "scripts" / "set-backlight-color.sh"
-MACROS_FILE = PROJECT_DIR / "macros.json"
 MAIN_KEYBOARD_DEVICE = "/dev/input/by-id/usb-Logitech_G510s_Gaming_Keyboard-event-kbd"
 STATS_BINARY = PROJECT_DIR / "src" / "g510_lcd_stats"
-CUSTOM_SCREENS_FILE = PROJECT_DIR / "custom_screens.txt"
+
+# Your own macros/custom-screens config and imported images live under
+# ~/.local/share/g510-lcd, independent of where the program itself is
+# installed from (a dev checkout via install.sh, or a real package
+# under a fixed /usr/lib/g510-lcd) -- so a package upgrade never
+# touches what you've actually configured. Mirrors the identical
+# data_dir()/migrate_*_if_needed() logic in g510_lcd_stats.c -- both
+# sides need to agree on this path independently since the C binary
+# and this GUI both read/write the same files without talking to each
+# other directly.
+DATA_DIR = Path.home() / ".local" / "share" / "g510-lcd"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _migrate_file_if_needed(old_path: Path, new_path: Path):
+    if new_path.exists() or not old_path.exists():
+        return
+    new_path.write_bytes(old_path.read_bytes())
+
+
+def _migrate_dir_if_needed(old_dir: Path, new_dir: Path):
+    if not old_dir.is_dir():
+        return
+    new_dir.mkdir(parents=True, exist_ok=True)
+    for f in old_dir.iterdir():
+        if f.is_file():
+            _migrate_file_if_needed(f, new_dir / f.name)
+
+
+_migrate_file_if_needed(PROJECT_DIR / "custom_screens.txt", DATA_DIR / "custom_screens.txt")
+_migrate_file_if_needed(PROJECT_DIR / "macros.json", DATA_DIR / "macros.json")
+_migrate_dir_if_needed(PROJECT_DIR / "custom_screen_images", DATA_DIR / "custom_screen_images")
+
+MACROS_FILE = DATA_DIR / "macros.json"
+CUSTOM_SCREENS_FILE = DATA_DIR / "custom_screens.txt"
 LCD_WIDTH = 160
 LCD_HEIGHT = 43
 
@@ -621,7 +654,7 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
-CUSTOM_SCREEN_IMAGES_DIR = PROJECT_DIR / "custom_screen_images"
+CUSTOM_SCREEN_IMAGES_DIR = DATA_DIR / "custom_screen_images"
 
 
 def load_custom_screens():
@@ -1237,7 +1270,7 @@ class CustomScreensTab(QWidget):
         default_y = min(6 + 15 * image_count, max(0, LCD_HEIGHT - h))
         elements.append({
             "kind": "image",
-            "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against PROJECT_DIR
+            "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against data_dir()
             "x": default_x, "y": default_y,
             "width": w, "height": h,
         })

@@ -19,7 +19,18 @@ import evdev
 from evdev import ecodes
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent  # repo root (this file lives in src/)
-MACROS_FILE = PROJECT_DIR / "macros.json"
+
+# Same DATA_DIR/migration logic as g510_app.py and g510_lcd_stats.c --
+# this daemon is its own systemd --user service, started independently
+# at login, so it can't assume the GUI has already run and migrated
+# macros.json over. Idempotent either way if both happen to race.
+DATA_DIR = Path.home() / ".local" / "share" / "g510-lcd"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+_old_macros = PROJECT_DIR / "macros.json"
+_new_macros = DATA_DIR / "macros.json"
+if not _new_macros.exists() and _old_macros.exists():
+    _new_macros.write_bytes(_old_macros.read_bytes())
+MACROS_FILE = _new_macros
 DEVICE_PATH = "/dev/g510-keys"
 
 G_KEY_CODES = {getattr(ecodes, f"KEY_MACRO{i}"): f"G{i}" for i in range(1, 19)}
