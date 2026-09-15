@@ -138,16 +138,35 @@ is essentially all G910-side merge work, not overlapping G510s files —
 verified this session, not assumed), so a real `git merge`/rebase
 review at that point is warranted before treating it as a formality.
 
-## Phase 4 — AUR packaging (stretch goal, not yet started)
+## Phase 4 / "Option B" — AUR packaging (stretch goal, not yet started)
 
-`READY_FOR_ANYONE.md` already researched this against a real installed
-reference (`solaar` — same problem domain, Logitech HID++ device
-control, PyQt-based, needs a udev rule): a proper PKGBUILD, service
-units under `/usr/lib/systemd/user/`, udev rule under
-`/usr/lib/udev/rules.d/`, and `depends=` doing what `install.sh`'s
-hand-rolled dependency script does today. This takes the app from
-"clone and run install.sh" to "`yay -S`" — genuinely nice-to-have, not
-blocking anything above it, and not started.
+Referred to elsewhere as "Plan B"/"Option B" — same thing as this
+phase, confirmed directly by the user 2026-09-15.
+
+`READY_FOR_ANYONE.md` already researched the packaging mechanics
+against a real installed reference (`solaar` — same problem domain,
+Logitech HID++ device control, PyQt-based, needs a udev rule): a
+proper PKGBUILD, service units under `/usr/lib/systemd/user/`, udev
+rule under `/usr/lib/udev/rules.d/`, and `depends=` doing what
+`install.sh`'s hand-rolled dependency script does today. This takes
+the app from "clone and run install.sh" to "`yay -S`".
+
+**Identity-in-history blocker — resolved by user decision, not a
+technical fix:** real AUR packaging needs a public source repo, but
+this repo's commit history has the user's real email address in
+essentially every commit (`Co-Authored-By:` trailers) and can't be
+easily scrubbed without rewriting history shared across multiple
+active branches/machines. The user's explicit decision (2026-09-15,
+asked directly, not assumed): don't solve this in the current repo.
+Keep building normally here through Phases 0-3. Once the app is
+genuinely complete, the user will personally create a fresh repo for
+the real public/AUR release at that point — this phase's actual
+packaging work (PKGBUILD, etc.) can still be prototyped/tested here,
+but the *publish* step targets that future clean repo, not this one.
+This same blocker and resolution applies to the G910 side's equivalent
+phase (their own "Phase B") — same shared repo, same history.
+
+Still a stretch goal, still not blocking anything in Phases 0-3.
 
 ## Why this order
 
