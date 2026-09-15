@@ -20,7 +20,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QGridLayout, QComboBox, QPushButton, QLabel,
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame, QScrollArea,
-    QFileDialog,
+    QFileDialog, QInputDialog,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen
@@ -807,6 +807,8 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
+MAX_TEXTS_PER_SCREEN = 4  # matches MAX_TEXTS in g510_lcd_stats.c
+TEXT_CHAR_PX = 6  # rough estimate for G15_TEXT_SMALL's per-character width -- no real font-metric access from Python for freeform text (same reason sensor elements originally needed the .meta sidecar), but text elements deliberately skip that mechanism (see on_add_text's docstring) so this stays an approximation, not pixel-perfect
 CUSTOM_SCREEN_IMAGES_DIR = DATA_DIR / "custom_screen_images"
 
 
@@ -852,6 +854,24 @@ def load_custom_screens():
                     im[k] = v
             if im["path"] and im["width"] > 0 and im["height"] > 0:
                 config[current].append(im)
+        elif line.startswith("TEXT ") and current:
+            # Underscores decode to spaces -- matches g510_lcd_stats.c's
+            # own decoding exactly, keeps the space-delimited line
+            # parser on both sides simple (no quoted-string handling).
+            tx = {"kind": "text", "content": "", "x": 0, "y": 0}
+            for tok in line[len("TEXT "):].split():
+                if "=" not in tok:
+                    continue
+                k, v = tok.split("=", 1)
+                if k in ("x", "y"):
+                    try:
+                        tx[k] = int(v)
+                    except ValueError:
+                        pass
+                elif k == "content":
+                    tx[k] = v.replace("_", " ")
+            if tx["content"]:
+                config[current].append(tx)
     return config
 
 
@@ -865,6 +885,15 @@ def save_custom_screens(config):
                     f"IMAGE path={el['path']} width={el['width']} height={el['height']} "
                     f"x={el['x']} y={el['y']}"
                 )
+            elif el.get("kind") == "text":
+                # Spaces -> underscores, matching exactly what
+                # load_custom_screens() and g510_lcd_stats.c both
+                # decode back. A literal underscore the user typed
+                # will round-trip as a space on reload -- a known,
+                # accepted limitation (documented in
+                # load_custom_screens()), not silent data corruption.
+                content = el["content"].replace(" ", "_") or "_"
+                lines.append(f"TEXT content={content} x={el['x']} y={el['y']}")
             else:
                 width = el.get("width", 40)
                 lines.append(
@@ -1021,6 +1050,15 @@ class ScreenPreviewCanvas(QWidget):
             # there's no font-metric unknown here.
             return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
                          el["width"] * PREVIEW_SCALE, el["height"] * PREVIEW_SCALE)
+        if el.get("kind") == "text":
+            # Estimated box (TEXT_CHAR_PX per character) -- same
+            # category of approximation images already use, since
+            # there's no real font-metric measurement for freeform
+            # text (see on_add_text's docstring for why that's a
+            # deliberate scope decision, not an oversight).
+            est_w = max(20, len(el["content"]) * TEXT_CHAR_PX)
+            return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
+                         est_w * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE)
         b = self._bounds.get(index)
         if b and "label_x1" in b:
             # Real geometry: covers the label through the end of the
@@ -1265,6 +1303,11 @@ class CustomScreensTab(QWidget):
         self.import_image_btn.clicked.connect(self.on_import_image)
         panel_layout.addWidget(self.import_image_btn)
 
+        self.add_text_btn = QPushButton("Add Text...")
+        self.add_text_btn.setObjectName("PanelButton")
+        self.add_text_btn.clicked.connect(self.on_add_text)
+        panel_layout.addWidget(self.add_text_btn)
+
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setObjectName("Separator")
@@ -1329,6 +1372,8 @@ class CustomScreensTab(QWidget):
         self.add_btn.setToolTip(l1_reason)
         self.import_image_btn.setEnabled(editable)
         self.import_image_btn.setToolTip(l1_reason)
+        self.add_text_btn.setEnabled(editable)
+        self.add_text_btn.setToolTip(l1_reason)
         self.refresh_elements_list()
         self.refresh_preview()
 
@@ -1459,6 +1504,44 @@ class CustomScreensTab(QWidget):
         self.refresh_elements_list()
         self.refresh_preview()
 
+    def on_add_text(self):
+        """Freeform text, not tied to a sensor -- direct request: "L3
+        L4 L5 have hard coded text i cant edit move do anything with.
+        add an option for me to add text fields too" (referring to the
+        "not set up yet" placeholder). Deliberately skips the .meta
+        bounds mechanism sensor elements use (that needs real
+        font-metric measurement from the C side, keyed to a shared
+        index between C's sensor-only array and Python's combined
+        list -- extending that correctly for a third element kind
+        wasn't worth the risk for a freeform-text feature); hit-testing
+        instead uses a simple estimated box, the same category of
+        approximation images already accept for their own bounds."""
+        if self.current_screen == "L1":
+            return  # button is disabled for this case, this is just a safety guard
+        elements = self.config[self.current_screen]
+        text_count = sum(1 for el in elements if el.get("kind") == "text")
+        if text_count >= MAX_TEXTS_PER_SCREEN:
+            QMessageBox.warning(
+                self, "Screen full",
+                f"Each screen supports up to {MAX_TEXTS_PER_SCREEN} text fields -- "
+                "the 160x43 screen is small, more than that rarely fits usefully anyway."
+            )
+            return
+
+        content, ok = QInputDialog.getText(self, "Add text", "Text to show on the screen:")
+        content = content.strip()
+        if not ok or not content:
+            return
+
+        # Same staggered-default-position pattern as on_add_element/
+        # on_import_image -- otherwise a second text field lands
+        # exactly on top of the first, invisible until dragged away.
+        default_y = (6 + 12 * text_count) % LCD_HEIGHT
+        elements.append({"kind": "text", "content": content, "x": 6, "y": default_y})
+        save_custom_screens(self.config)
+        self.refresh_elements_list()
+        self.refresh_preview()
+
     def on_remove_element(self, index):
         del self.config[self.current_screen][index]
         save_custom_screens(self.config)
@@ -1530,6 +1613,10 @@ class CustomScreensTab(QWidget):
                 name = Path(el["path"]).stem
                 text = QLabel(f"Image: {name}")
                 text.setToolTip(f"x={el['x']} y={el['y']} {el['width']}x{el['height']}px")
+            elif el.get("kind") == "text":
+                shown = el["content"] if len(el["content"]) <= 20 else el["content"][:17] + "..."
+                text = QLabel(f'Text: "{shown}"')
+                text.setToolTip(f"x={el['x']} y={el['y']}")
             else:
                 label = SENSOR_LABELS.get(el["sensor"], el["sensor"])
                 text = QLabel(f"{label} – {el['style']}")

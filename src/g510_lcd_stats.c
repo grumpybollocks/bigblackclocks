@@ -664,11 +664,28 @@ typedef struct {
     int x, y, width, height;
 } image_t;
 
+/* Freeform user text -- not tied to any sensor, direct request: "L3 L4
+   L5 have hard coded text i cant edit move do anything with. add an
+   option for me to add text fields too" (referring to the "not set up
+   yet" placeholder, correctly identified as non-editable by design --
+   this is the real, editable alternative). Spaces are stored as
+   underscores in custom_screens.txt (encoded/decoded entirely in
+   Python and here) rather than teaching the existing simple
+   space-delimited line parser to handle quoted strings -- keeps the
+   parser exactly as simple as it already is for ELEMENT/IMAGE lines. */
+#define MAX_TEXTS 4 /* small screen, plenty for freeform labels */
+typedef struct {
+    char content[48];
+    int x, y;
+} text_t;
+
 typedef struct {
     element_t elements[MAX_ELEMENTS];
     int count;
     image_t images[MAX_IMAGES];
     int image_count;
+    text_t texts[MAX_TEXTS];
+    int text_count;
 } custom_screen_t;
 
 static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
@@ -739,6 +756,29 @@ static void load_custom_screens(void) {
                malloc/fread far larger than the 160x43 screen could ever need */
             if (im->path[0] && im->width > 0 && im->width <= G15_LCD_WIDTH &&
                 im->height > 0 && im->height <= G15_LCD_HEIGHT) cs->image_count++;
+        } else if (strncmp(line, "TEXT ", 5) == 0 && current >= 0) {
+            custom_screen_t *cs = &custom_screens[current];
+            if (cs->text_count >= MAX_TEXTS) continue;
+            text_t *tx = &cs->texts[cs->text_count];
+            tx->content[0] = 0; tx->x = 0; tx->y = 0;
+            char rest[256];
+            strncpy(rest, line + 5, sizeof(rest) - 1);
+            rest[sizeof(rest) - 1] = 0;
+            char *tok = strtok(rest, " ");
+            while (tok) {
+                char key[32], val[192];
+                if (sscanf(tok, "%31[^=]=%191s", key, val) == 2) {
+                    if (strcmp(key, "content") == 0) {
+                        strncpy(tx->content, val, sizeof(tx->content) - 1);
+                        tx->content[sizeof(tx->content) - 1] = 0;
+                        for (char *p = tx->content; *p; p++) if (*p == '_') *p = ' ';
+                    }
+                    else if (strcmp(key, "x") == 0) tx->x = atoi(val);
+                    else if (strcmp(key, "y") == 0) tx->y = atoi(val);
+                }
+                tok = strtok(NULL, " ");
+            }
+            if (tx->content[0]) cs->text_count++;
         }
     }
     fclose(f);
@@ -850,11 +890,15 @@ static void draw_image_element(g15canvas *c, image_t *im) {
     free(data);
 }
 
+static void draw_text_element(g15canvas *c, text_t *tx) {
+    g15r_renderString(c, (unsigned char*)tx->content, 0, G15_TEXT_SMALL, tx->x, tx->y);
+}
+
 static void draw_custom_screen(g15canvas *c, int screen_num) {
     g_element_bounds_count = 0;
     load_custom_screens();
     custom_screen_t *cs = &custom_screens[screen_num - 2];
-    if (cs->count == 0 && cs->image_count == 0) {
+    if (cs->count == 0 && cs->image_count == 0 && cs->text_count == 0) {
         char label[8];
         snprintf(label, sizeof(label), "L%d", screen_num);
         g15r_G15FPrint(c, label, 0, 8, G15_TEXT_LARGE, G15_JUSTIFY_CENTER, G15_COLOR_BLACK, 0);
@@ -863,6 +907,7 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
     }
     for (int i = 0; i < cs->count; i++) draw_element(c, &cs->elements[i]);
     for (int i = 0; i < cs->image_count; i++) draw_image_element(c, &cs->images[i]);
+    for (int i = 0; i < cs->text_count; i++) draw_text_element(c, &cs->texts[i]);
 }
 
 int main(int argc, char **argv) {
