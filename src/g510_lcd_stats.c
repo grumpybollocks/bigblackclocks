@@ -776,6 +776,9 @@ typedef struct {
     char style[8]; /* "number" or "bar" */
     int x, y;
     int width; /* bar length in px, only meaningful for style="bar" -- ignored for "number" */
+    int font_size; /* G15_TEXT_SMALL(0)/MED(1)/LARGE(2)/HUGE(3) -- the VALUE
+                       text only; the sensor label always uses the fixed
+                       custom label_font, same as before this was added. */
 } element_t;
 
 /* A converted-to-1bpp image placed on a custom screen -- see
@@ -804,6 +807,7 @@ typedef struct {
 typedef struct {
     char content[48];
     int x, y;
+    int font_size; /* G15_TEXT_SMALL(0)/MED(1)/LARGE(2)/HUGE(3) */
 } text_t;
 
 typedef struct {
@@ -821,9 +825,23 @@ static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
    edits made live in the GUI show up on the next frame without needing
    the daemon restarted. */
 static void load_custom_screens(void) {
+    /* Real bug found while adding font-size support to this function:
+       text_count was never reset here, unlike count and image_count.
+       Harmless for the one-shot --preview mode (a fresh process always
+       starts from a zero-initialized static array), but in the live
+       LCD loop -- which reloads this file every 1-2s in the SAME
+       long-running process -- editing or removing a text element while
+       the service is running would append fresh entries past the
+       stale old ones instead of replacing them, since parsing always
+       starts writing at index cs->text_count. Never visibly hit yet
+       (the real custom_screens.txt had zero TEXT lines until tonight),
+       but would have shown as ghost/duplicate text on the real keyboard
+       the moment text elements were actually used without a service
+       restart in between. */
     for (int i = 0; i < MAX_CUSTOM_SCREENS; i++) {
         custom_screens[i].count = 0;
         custom_screens[i].image_count = 0;
+        custom_screens[i].text_count = 0;
     }
     FILE *f = fopen(custom_screens_path(), "r");
     if (!f) return;
@@ -842,6 +860,7 @@ static void load_custom_screens(void) {
             el->sensor[0] = 0; el->style[0] = 0; el->x = 0; el->y = 0;
             el->width = 40; /* matches the previous hardcoded bar length -- old
                                 config lines with no width= keep looking identical */
+            el->font_size = G15_TEXT_SMALL; /* old lines with no font= keep looking identical */
             char rest[256];
             strncpy(rest, line + 8, sizeof(rest) - 1);
             rest[sizeof(rest) - 1] = 0;
@@ -854,6 +873,10 @@ static void load_custom_screens(void) {
                     else if (strcmp(key, "x") == 0) el->x = atoi(val);
                     else if (strcmp(key, "y") == 0) el->y = atoi(val);
                     else if (strcmp(key, "width") == 0) el->width = atoi(val);
+                    else if (strcmp(key, "font") == 0) {
+                        int f = atoi(val);
+                        el->font_size = (f >= G15_TEXT_SMALL && f <= G15_TEXT_HUGE) ? f : G15_TEXT_SMALL;
+                    }
                 }
                 tok = strtok(NULL, " ");
             }
@@ -888,6 +911,7 @@ static void load_custom_screens(void) {
             if (cs->text_count >= MAX_TEXTS) continue;
             text_t *tx = &cs->texts[cs->text_count];
             tx->content[0] = 0; tx->x = 0; tx->y = 0;
+            tx->font_size = G15_TEXT_SMALL; /* old lines with no font= keep looking identical */
             char rest[256];
             strncpy(rest, line + 5, sizeof(rest) - 1);
             rest[sizeof(rest) - 1] = 0;
@@ -902,6 +926,10 @@ static void load_custom_screens(void) {
                     }
                     else if (strcmp(key, "x") == 0) tx->x = atoi(val);
                     else if (strcmp(key, "y") == 0) tx->y = atoi(val);
+                    else if (strcmp(key, "font") == 0) {
+                        int f = atoi(val);
+                        tx->font_size = (f >= G15_TEXT_SMALL && f <= G15_TEXT_HUGE) ? f : G15_TEXT_SMALL;
+                    }
                 }
                 tok = strtok(NULL, " ");
             }
@@ -956,14 +984,14 @@ static void draw_element(g15canvas *c, element_t *el) {
         int bar_x1 = value_x;
         int bar_x2 = bar_x1 + el->width;
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
-        g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, bar_x2 + 4, el->y);
+        g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, bar_x2 + 4, el->y);
         if (b) {
             b->is_bar = 1;
             b->bar_x1 = bar_x1; b->bar_x2 = bar_x2;
             b->bar_y1 = el->y; b->bar_y2 = el->y + BAR_H;
         }
     } else {
-        g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, value_x, el->y);
+        g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, value_x, el->y);
     }
 }
 
@@ -1018,18 +1046,21 @@ static void draw_image_element(g15canvas *c, image_t *im) {
 }
 
 static void draw_text_element(g15canvas *c, text_t *tx) {
-    g15r_renderString(c, (unsigned char*)tx->content, 0, G15_TEXT_SMALL, tx->x, tx->y);
+    g15r_renderString(c, (unsigned char*)tx->content, 0, tx->font_size, tx->x, tx->y);
 }
 
 static void draw_custom_screen(g15canvas *c, int screen_num) {
     g_element_bounds_count = 0;
     load_custom_screens();
     custom_screen_t *cs = &custom_screens[screen_num - 2];
+    /* Direct request: "this placeholder text on l3 l4 l5 gone" -- the
+       "L3 / not set up yet" label used to be drawn here whenever a
+       screen was genuinely empty. Confirmed via a real screenshot that
+       it read as permanently stuck/hardcoded content rather than an
+       honest empty-state indicator, so an unconfigured screen now just
+       draws nothing -- matches what the real LCD should show for a
+       screen with nothing on it. */
     if (cs->count == 0 && cs->image_count == 0 && cs->text_count == 0) {
-        char label[8];
-        snprintf(label, sizeof(label), "L%d", screen_num);
-        g15r_G15FPrint(c, label, 0, 8, G15_TEXT_LARGE, G15_JUSTIFY_CENTER, G15_COLOR_BLACK, 0);
-        g15r_renderString(c, (unsigned char*)"not set up yet", 0, G15_TEXT_SMALL, 24, 30);
         return;
     }
     for (int i = 0; i < cs->count; i++) draw_element(c, &cs->elements[i]);

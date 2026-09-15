@@ -13,7 +13,8 @@ the L2-L5 buttons on the keyboard. Here's the whole thing, short version.
      currently showing so you can see it without reaching for the
      keyboard; the Add/Import controls are disabled here (hover them
      for a tooltip explaining why) since there's nothing to edit.
-   - **L2-L5 are yours.** Add whatever you want to these.
+   - **L2-L5 are yours.** Add whatever you want to these. An empty
+     screen just shows blank — nothing to clear out first.
 
 2. **Add a sensor** — pick one (CPU %, RAM, GPU temp, whatever) from
    the first dropdown, pick **Number** (just shows the value) or
@@ -31,15 +32,20 @@ the L2-L5 buttons on the keyboard. Here's the whole thing, short version.
 5. **Put an image on it** — click **Import Image...**, pick a picture
    from your computer, and it gets shrunk down and converted
    automatically to fit the tiny black-and-white screen. Drag it around
-   like anything else. (No resizing images yet — pick one that's
-   already roughly the right size, or just re-import it.)
+   like anything else.
 
-6. **Resize a bar** — hover your mouse near a bar and a little blue
-   square appears at its right end. Drag that to make the bar longer
-   or shorter. (Number-style and text items don't have this — there's
-   nothing to resize, it's just text.)
+6. **Resize a bar or an image** — hover your mouse near a bar's right
+   end, or an image's bottom-right corner, and a little blue square
+   appears. Drag that to make it bigger or smaller.
 
-7. **Remove something** — click the ✕ next to it in the list on the
+7. **Resize a number or a text field** — these are just text, and the
+   screen's tiny built-in fonts don't stretch smoothly, so there's no
+   drag handle. Instead, pick a size (Small/Medium/Large/Huge) from
+   the **Text Size** dropdown before adding one, or click the size
+   button (e.g. "Small") next to an existing one in the list on the
+   right to cycle through the sizes.
+
+8. **Remove something** — click the ✕ next to it in the list on the
    right.
 
 That's it. **Nothing needs a Save button** — every change (move,
@@ -59,9 +65,13 @@ resize, add, remove) saves itself instantly.
 - **"Bar" isn't available for every sensor** — only ones with an
   honest 0-100% or a sensible temperature range (the app will tell you
   if you pick one that can't; it just shows as a number instead).
-- **The blue resize handle only shows up when you're near a bar.** It
-  used to always show on every bar at once, which looked cluttered and
-  confusing — now it only appears when you're actually about to use it.
+- **The blue resize handle only shows up when you're near a bar or a
+  resizable image.** It used to always show on every bar at once,
+  which looked cluttered and confusing — now it only appears when
+  you're actually about to use it.
+- **Sensor picker shows what each one means** — the description under
+  the dropdown updates as you change the selection, so you don't have
+  to guess what "GPU Hotspot Temp" or "Max Temp Seen" actually is.
 
 ## Bringing it to the real keyboard
 

@@ -13,6 +13,7 @@ Phase 2: Custom Screens tab (AIDA64-style sensor dashboard builder for
 """
 import sys
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -783,6 +784,43 @@ SENSOR_CHOICES = [
 ]
 SENSOR_LABELS = dict(SENSOR_CHOICES)
 
+# Direct feedback: "the functions are weird, i dont know from that
+# list what is what and exactly what they do." Plain-language
+# one-liners shown live under the sensor dropdown -- the ones that
+# aren't self-evident (MAXTEMP, the GPU Edge/Hotspot/VRAM temp split,
+# the unlabeled motherboard sensors) are worded from the *real*
+# semantics in g510_lcd_stats.c (checked directly, not assumed): MAXTEMP
+# is "since this program started", not all-time; Edge vs Hotspot are
+# two distinct, real AMD GPU sensors, not a duplicate/typo.
+SENSOR_DESCRIPTIONS = {
+    "CPU_PCT": "Overall CPU load, averaged across all cores.",
+    "CPU_GHZ": "Current CPU clock speed.",
+    "CPU_TEMP": "CPU package temperature.",
+    "RAM_PCT": "RAM used, as a percentage of total.",
+    "RAM_AMOUNT": "RAM used, as an actual amount (e.g. 12.3 GB).",
+    "VRAM_PCT": "GPU VRAM used, as a percentage of total.",
+    "VRAM_AMOUNT": "GPU VRAM used, as an actual amount.",
+    "MAXTEMP": "Highest CPU temp seen since the LCD service last started -- not an all-time record.",
+    "GPU_PCT": "GPU utilization.",
+    "GPU_EDGE_TEMP": "The GPU die's main temperature sensor -- what most tools just call \"GPU temp\".",
+    "GPU_HOTSPOT_TEMP": "The single hottest point on the GPU die -- usually a bit higher than Edge Temp.",
+    "GPU_VRAM_TEMP": "GPU memory (VRAM) temperature -- separate from the GPU die itself.",
+    "SWAP_PCT": "Swap space used, as a percentage of total swap.",
+    "DISK_ROOT_PCT": "Disk space used on your root (/) filesystem.",
+    "DISK_FRIGIDER_PCT": "Disk space used on your \"frigider\" drive.",
+    "UPTIME": "How long this PC has been running since boot.",
+    "NET_DOWN": "Current network download speed.",
+    "NET_UP": "Current network upload speed.",
+    "TIME": "Current time (same clock as the L1 screen).",
+    "DATE": "Current date (same clock as the L1 screen).",
+    "MB_TEMP1": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+    "MB_TEMP2": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+    "MB_TEMP3": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+    "MB_TEMP4": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+    "MB_TEMP5": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+    "MB_TEMP6": "One of your motherboard's temperature sensors -- your hardware doesn't label what it measures.",
+}
+
 # Only sensors with an honest 0-100 scale (a true percent, or a
 # temperature via the 0-90C convention already used on the main stats
 # screen) can be shown as a bar -- matches is_percent/is_temp in the C
@@ -809,6 +847,22 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
 MAX_TEXTS_PER_SCREEN = 4  # matches MAX_TEXTS in g510_lcd_stats.c
 TEXT_CHAR_PX = 6  # rough estimate for G15_TEXT_SMALL's per-character width -- no real font-metric access from Python for freeform text (same reason sensor elements originally needed the .meta sidecar), but text elements deliberately skip that mechanism (see on_add_text's docstring) so this stays an approximation, not pixel-perfect
+
+# Direct request: "id like to be able to resize elements". libg15render
+# only has 4 discrete built-in text sizes (checked the header: no
+# continuous scaling exists), so "resize" for Number/Text elements
+# means picking one of these, not a drag handle. Names shown in the
+# UI; values are g510_lcd_stats.c's G15_TEXT_SMALL/MED/LARGE/HUGE (0-3).
+FONT_SIZE_CHOICES = [(0, "Small"), (1, "Medium"), (2, "Large"), (3, "Huge")]
+# Real measured width/height scale relative to SMALL (rendered "88" on
+# an actual canvas and scanned the lit-pixel bounding box, same
+# technique used throughout this project for font metrics -- not
+# guessed): SMALL=7x5, MED=9x6, LARGE=15x7, HUGE=13x10. Used only to
+# scale TEXT_CHAR_PX/ELEMENT_HIT_H for freeform text's own estimated
+# hit-box (see _element_rect) -- sensor elements get their bounds from
+# the C-side .meta sidecar instead, unaffected by this.
+FONT_SIZE_SCALE = {0: (1.0, 1.0), 1: (9 / 7, 6 / 5), 2: (15 / 7, 7 / 5), 3: (13 / 7, 10 / 5)}
+
 CUSTOM_SCREEN_IMAGES_DIR = DATA_DIR / "custom_screen_images"
 
 
@@ -825,7 +879,7 @@ def load_custom_screens():
             key = line.split(" ", 1)[1]
             current = key if key in config else None
         elif line.startswith("ELEMENT ") and current:
-            el = {"kind": "sensor", "sensor": "", "style": "number", "x": 0, "y": 0, "width": 40}
+            el = {"kind": "sensor", "sensor": "", "style": "number", "x": 0, "y": 0, "width": 40, "font_size": 0}
             for tok in line[len("ELEMENT "):].split():
                 if "=" not in tok:
                     continue
@@ -835,12 +889,25 @@ def load_custom_screens():
                         el[k] = int(v)
                     except ValueError:
                         pass
+                elif k == "font":
+                    try:
+                        el["font_size"] = int(v) if int(v) in (0, 1, 2, 3) else 0
+                    except ValueError:
+                        pass
                 elif k in ("sensor", "style"):
                     el[k] = v
             if el["sensor"]:
                 config[current].append(el)
         elif line.startswith("IMAGE ") and current:
-            im = {"kind": "image", "path": "", "x": 0, "y": 0, "width": 0, "height": 0}
+            # "src" is optional and only present for images imported
+            # since drag-resize was added: a copy of the original
+            # source picture (not the already-downscaled/dithered
+            # .bin) kept alongside it so a resize can re-convert from
+            # real source quality instead of upscaling a 1-bit bitmap.
+            # Older IMAGE lines without src= parse fine -- src just
+            # stays absent, and those images fall back to no resize
+            # handle (same as today: re-import to change size).
+            im = {"kind": "image", "path": "", "x": 0, "y": 0, "width": 0, "height": 0, "src": None}
             for tok in line[len("IMAGE "):].split():
                 if "=" not in tok:
                     continue
@@ -850,7 +917,7 @@ def load_custom_screens():
                         im[k] = int(v)
                     except ValueError:
                         pass
-                elif k == "path":
+                elif k in ("path", "src"):
                     im[k] = v
             if im["path"] and im["width"] > 0 and im["height"] > 0:
                 config[current].append(im)
@@ -858,7 +925,7 @@ def load_custom_screens():
             # Underscores decode to spaces -- matches g510_lcd_stats.c's
             # own decoding exactly, keeps the space-delimited line
             # parser on both sides simple (no quoted-string handling).
-            tx = {"kind": "text", "content": "", "x": 0, "y": 0}
+            tx = {"kind": "text", "content": "", "x": 0, "y": 0, "font_size": 0}
             for tok in line[len("TEXT "):].split():
                 if "=" not in tok:
                     continue
@@ -866,6 +933,11 @@ def load_custom_screens():
                 if k in ("x", "y"):
                     try:
                         tx[k] = int(v)
+                    except ValueError:
+                        pass
+                elif k == "font":
+                    try:
+                        tx["font_size"] = int(v) if int(v) in (0, 1, 2, 3) else 0
                     except ValueError:
                         pass
                 elif k == "content":
@@ -881,9 +953,10 @@ def save_custom_screens(config):
         lines.append(f"SCREEN {key}")
         for el in config[key]:
             if el.get("kind") == "image":
+                src_part = f" src={el['src']}" if el.get("src") else ""
                 lines.append(
                     f"IMAGE path={el['path']} width={el['width']} height={el['height']} "
-                    f"x={el['x']} y={el['y']}"
+                    f"x={el['x']} y={el['y']}{src_part}"
                 )
             elif el.get("kind") == "text":
                 # Spaces -> underscores, matching exactly what
@@ -893,12 +966,12 @@ def save_custom_screens(config):
                 # accepted limitation (documented in
                 # load_custom_screens()), not silent data corruption.
                 content = el["content"].replace(" ", "_") or "_"
-                lines.append(f"TEXT content={content} x={el['x']} y={el['y']}")
+                lines.append(f"TEXT content={content} x={el['x']} y={el['y']} font={el.get('font_size', 0)}")
             else:
                 width = el.get("width", 40)
                 lines.append(
                     f"ELEMENT sensor={el['sensor']} style={el['style']} "
-                    f"x={el['x']} y={el['y']} width={width}"
+                    f"x={el['x']} y={el['y']} width={width} font={el.get('font_size', 0)}"
                 )
     CUSTOM_SCREENS_FILE.write_text("\n".join(lines) + "\n")
 
@@ -1007,6 +1080,7 @@ ELEMENT_HIT_H = 10
 RESIZE_HANDLE_PX = 5   # half-size of the little resize square, in LCD px
 MIN_BAR_WIDTH = 10
 MAX_BAR_WIDTH = 140
+MIN_IMAGE_SIZE = 4     # smallest an image can be dragged down to, in LCD px
 
 
 class ScreenPreviewCanvas(QWidget):
@@ -1016,7 +1090,8 @@ class ScreenPreviewCanvas(QWidget):
     go, same underlying --preview mechanism as before, just wired to
     mouse events instead of typed X/Y/width numbers."""
     element_moved = pyqtSignal(int, int, int)   # index, new_x, new_y (LCD-space)
-    element_resized = pyqtSignal(int, int)        # index, new_width (LCD-space)
+    element_resized = pyqtSignal(int, int)        # index, new_width (LCD-space) -- bars only
+    image_resize_requested = pyqtSignal(int, int, int)  # index, target_width, target_height (LCD-space)
     drag_started = pyqtSignal()
     drag_finished = pyqtSignal()
 
@@ -1028,8 +1103,20 @@ class ScreenPreviewCanvas(QWidget):
         self._drag_index = None
         self._drag_offset = QPoint(0, 0)
         self._resize_index = None
+        self._resize_kind = None  # "bar" or "image" -- which resize gesture is active
         self._resize_start_x = 0
         self._resize_start_width = 0
+        # Live target size while dragging an image's corner handle --
+        # separate from el["width"/"height"] on purpose: the actual
+        # bitmap only gets regenerated on the throttled timer tick (see
+        # CustomScreensTab._apply_pending_image_resize), so mutating the
+        # element's real size here would let the drawn dashed box (and
+        # then the next --preview render) claim a size the .bin file on
+        # disk doesn't have yet -- same class of bug the atomic
+        # tmp+rename write fix addressed on the C side, just on the
+        # Python/file side instead. This is purely the visual target
+        # for the dashed selection box between regenerations.
+        self._image_resize_preview_wh = None
         self._hover_index = None  # bar element the mouse is currently near -- only ITS handle is drawn
         self.setFixedSize(LCD_WIDTH * PREVIEW_SCALE, LCD_HEIGHT * PREVIEW_SCALE)
         self.setMouseTracking(True)
@@ -1055,10 +1142,15 @@ class ScreenPreviewCanvas(QWidget):
             # category of approximation images already use, since
             # there's no real font-metric measurement for freeform
             # text (see on_add_text's docstring for why that's a
-            # deliberate scope decision, not an oversight).
-            est_w = max(20, len(el["content"]) * TEXT_CHAR_PX)
+            # deliberate scope decision, not an oversight). Scaled by
+            # FONT_SIZE_SCALE's real measured width/height ratios so a
+            # Medium/Large/Huge text field's hit-box roughly tracks its
+            # actual larger size instead of staying stuck at Small's.
+            w_ratio, h_ratio = FONT_SIZE_SCALE.get(el.get("font_size", 0), (1.0, 1.0))
+            est_w = max(20, round(len(el["content"]) * TEXT_CHAR_PX * w_ratio))
+            est_h = round(ELEMENT_HIT_H * h_ratio)
             return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
-                         est_w * PREVIEW_SCALE, ELEMENT_HIT_H * PREVIEW_SCALE)
+                         est_w * PREVIEW_SCALE, est_h * PREVIEW_SCALE)
         b = self._bounds.get(index)
         if b and "label_x1" in b:
             # Real geometry: covers the label through the end of the
@@ -1082,6 +1174,13 @@ class ScreenPreviewCanvas(QWidget):
         el = self._elements[index]
         b = self._bounds.get(index)
         r = RESIZE_HANDLE_PX * PREVIEW_SCALE
+        if el.get("kind") == "image":
+            # Bottom-right corner of the image's own known box -- no
+            # font-metric guess needed here, images know their exact
+            # size directly (same reasoning as _element_rect's image case).
+            hx = (el["x"] + el["width"]) * PREVIEW_SCALE
+            hy = (el["y"] + el["height"]) * PREVIEW_SCALE
+            return QRect(hx - r, hy - r, r * 2, r * 2)
         if b and "bar_x2" in b:
             # Exactly where the real bar ends -- this is the fix for
             # the handle drifting away from the actual bar, reported
@@ -1102,10 +1201,21 @@ class ScreenPreviewCanvas(QWidget):
                 return i
         return None
 
+    def _resizable(self, el):
+        if el.get("style") == "bar":
+            return True
+        # Only images imported since drag-resize was added carry a
+        # "src" (a kept copy of the real source picture) -- an older
+        # image element has none, and re-converting from its own
+        # already-downscaled 1-bit .bin would just upscale a dithered
+        # bitmap into something worse, not a real resize. No handle
+        # offered for those; re-importing still works as before.
+        return el.get("kind") == "image" and bool(el.get("src"))
+
     def _resize_handle_at(self, pos):
         for i in range(len(self._elements) - 1, -1, -1):
             el = self._elements[i]
-            if el.get("style") == "bar" and self._resize_handle_rect(i).contains(pos):
+            if self._resizable(el) and self._resize_handle_rect(i).contains(pos):
                 return i
         return None
 
@@ -1120,7 +1230,7 @@ class ScreenPreviewCanvas(QWidget):
         # confusing ("wtf are the blue squares for?").
         handle_owner = self._resize_index if self._resize_index is not None else self._hover_index
         if handle_owner is not None and 0 <= handle_owner < len(self._elements) \
-                and self._elements[handle_owner].get("style") == "bar":
+                and self._resizable(self._elements[handle_owner]):
             painter.setPen(QPen(QColor(120, 120, 120), 1))
             painter.setBrush(QColor(70, 140, 230, 180))
             painter.drawRect(self._resize_handle_rect(handle_owner))
@@ -1128,16 +1238,29 @@ class ScreenPreviewCanvas(QWidget):
         if active is not None:
             painter.setPen(QPen(QColor(70, 140, 230), 2, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._element_rect(active))
+            if self._resize_kind == "image" and self._image_resize_preview_wh:
+                el = self._elements[active]
+                w, h = self._image_resize_preview_wh
+                rect = QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
+                             w * PREVIEW_SCALE, h * PREVIEW_SCALE)
+            else:
+                rect = self._element_rect(active)
+            painter.drawRect(rect)
 
     def mousePressEvent(self, event):
         if event.button() != Qt.LeftButton:
             return
         r_idx = self._resize_handle_at(event.pos())
         if r_idx is not None:
+            el = self._elements[r_idx]
             self._resize_index = r_idx
-            self._resize_start_x = event.pos().x()
-            self._resize_start_width = self._elements[r_idx].get("width", 40)
+            if el.get("kind") == "image":
+                self._resize_kind = "image"
+                self._image_resize_preview_wh = (el["width"], el["height"])
+            else:
+                self._resize_kind = "bar"
+                self._resize_start_x = event.pos().x()
+                self._resize_start_width = el.get("width", 40)
             self.update()
             self.drag_started.emit()
             return
@@ -1152,6 +1275,19 @@ class ScreenPreviewCanvas(QWidget):
         self.drag_started.emit()
 
     def mouseMoveEvent(self, event):
+        if self._resize_index is not None and self._resize_kind == "image":
+            self.setCursor(Qt.SizeFDiagCursor)
+            el = self._elements[self._resize_index]
+            target_w = round(event.pos().x() / PREVIEW_SCALE) - el["x"]
+            target_h = round(event.pos().y() / PREVIEW_SCALE) - el["y"]
+            target_w = max(MIN_IMAGE_SIZE, min(LCD_WIDTH - el["x"], target_w))
+            target_h = max(MIN_IMAGE_SIZE, min(LCD_HEIGHT - el["y"], target_h))
+            if self._image_resize_preview_wh != (target_w, target_h):
+                self._image_resize_preview_wh = (target_w, target_h)
+                self.image_resize_requested.emit(self._resize_index, target_w, target_h)
+            self.update()
+            return
+
         if self._resize_index is not None:
             self.setCursor(Qt.SizeHorCursor)
             delta = round((event.pos().x() - self._resize_start_x) / PREVIEW_SCALE)
@@ -1166,12 +1302,13 @@ class ScreenPreviewCanvas(QWidget):
         if self._drag_index is None:
             idx = self._element_at(event.pos())
             over_handle = self._resize_handle_at(event.pos()) is not None
-            new_hover = idx if (idx is not None and self._elements[idx].get("style") == "bar") else None
+            new_hover = idx if (idx is not None and self._resizable(self._elements[idx])) else None
             if new_hover != self._hover_index:
                 self._hover_index = new_hover
                 self.update()
             if over_handle:
-                self.setCursor(Qt.SizeHorCursor)
+                is_image = idx is not None and self._elements[idx].get("kind") == "image"
+                self.setCursor(Qt.SizeFDiagCursor if is_image else Qt.SizeHorCursor)
             elif idx is not None:
                 self.setCursor(Qt.OpenHandCursor)
             else:
@@ -1192,6 +1329,8 @@ class ScreenPreviewCanvas(QWidget):
             return
         if self._resize_index is not None:
             self._resize_index = None
+            self._resize_kind = None
+            self._image_resize_preview_wh = None
             self.setCursor(Qt.ArrowCursor)
             self.update()
             self.drag_finished.emit()
@@ -1250,13 +1389,15 @@ class CustomScreensTab(QWidget):
         self.preview_canvas = ScreenPreviewCanvas()
         self.preview_canvas.element_moved.connect(self.on_element_dragged)
         self.preview_canvas.element_resized.connect(self.on_element_resized)
+        self.preview_canvas.image_resize_requested.connect(self.on_image_resize_requested)
         self.preview_canvas.drag_started.connect(self.on_drag_started)
         self.preview_canvas.drag_finished.connect(self.on_drag_finished)
+        self._pending_image_resize = None  # (index, target_w, target_h) -- see _apply_pending_image_resize
         canvas_col.addWidget(self.preview_canvas)
 
         drag_hint = QLabel(
-            "Drag an element or image to move it. Hover a bar to reveal its "
-            "resize handle (right edge). Images resize by re-importing."
+            "Drag anything to move it. Hover a bar or a freshly-imported "
+            "image to reveal its resize handle."
         )
         drag_hint.setWordWrap(True)
         drag_hint.setObjectName("Status")
@@ -1280,10 +1421,29 @@ class CustomScreensTab(QWidget):
         self.sensor_combo.currentIndexChanged.connect(self.on_sensor_changed)
         panel_layout.addWidget(self.sensor_combo)
 
+        # Direct feedback: "i dont know from that list what is what
+        # and exactly what they do" -- live one-line explanation of
+        # whatever's currently selected, not just a label to guess at.
+        self.sensor_desc_label = QLabel("")
+        self.sensor_desc_label.setObjectName("Status")
+        self.sensor_desc_label.setWordWrap(True)
+        panel_layout.addWidget(self.sensor_desc_label)
+
         self.style_combo = QComboBox()
         self.style_combo.addItem("Number", "number")
         self.style_combo.addItem("Bar", "bar")
         panel_layout.addWidget(self.style_combo)
+
+        # Direct request: "id like to be able to resize elements".
+        # Shared between new sensor elements and new text elements --
+        # both just render through g15r_renderString at whatever size
+        # this picks (see FONT_SIZE_CHOICES). Applies to the sensor's
+        # VALUE only; the label always stays the fixed custom font.
+        panel_layout.addWidget(QLabel("Text Size:"))
+        self.font_size_combo = QComboBox()
+        for value, label in FONT_SIZE_CHOICES:
+            self.font_size_combo.addItem(label, value)
+        panel_layout.addWidget(self.font_size_combo)
 
         self.bar_hint_label = QLabel(
             "No honest 0-100 scale for this sensor -- shows as a number."
@@ -1292,6 +1452,10 @@ class CustomScreensTab(QWidget):
         self.bar_hint_label.setWordWrap(True)
         self.bar_hint_label.hide()
         panel_layout.addWidget(self.bar_hint_label)
+        # connect() above ran before this label existed, and Qt doesn't
+        # retroactively fire currentIndexChanged for an already-selected
+        # index -- populate the description for the startup selection.
+        self.on_sensor_changed()
 
         self.add_btn = add_btn = QPushButton("Add")
         add_btn.setObjectName("PanelPrimary")
@@ -1381,6 +1545,7 @@ class CustomScreensTab(QWidget):
         sensor_key = self.sensor_combo.currentData()
         capable = sensor_key in BAR_CAPABLE_SENSORS
         self.bar_hint_label.setVisible(not capable)
+        self.sensor_desc_label.setText(SENSOR_DESCRIPTIONS.get(sensor_key, ""))
 
     def screen_number(self):
         # L1 used to hardcode to 1 (the clock) always -- but L1 really
@@ -1426,6 +1591,7 @@ class CustomScreensTab(QWidget):
             "x": 6,
             "y": default_y,
             "width": 40,
+            "font_size": self.font_size_combo.currentData(),
         })
         save_custom_screens(self.config)
         self.refresh_elements_list()
@@ -1463,12 +1629,28 @@ class CustomScreensTab(QWidget):
             out_path = CUSTOM_SCREEN_IMAGES_DIR / f"{stem}_{n}.bin"
             n += 1
 
-        # No manual crop/resize UI -- trust png-to-lcd.py's own
+        # Keep a copy of the real source picture alongside the
+        # converted .bin (same disambiguated stem, original extension)
+        # -- needed so a later resize can re-convert from real
+        # quality instead of upscaling the already-downscaled 1-bit
+        # bitmap. Not the same file the user picked: that path could
+        # move or be deleted later, this copy is self-contained under
+        # DATA_DIR like everything else this app persists.
+        src_ext = Path(src_path).suffix or ".png"
+        src_copy_path = out_path.with_suffix(src_ext)
+        try:
+            shutil.copyfile(src_path, src_copy_path)
+        except OSError:
+            src_copy_path = None  # resize just won't be offered for this image
+
+        # Initial import always goes through png-to-lcd.py's own
         # automatic resize + dithering (already Floyd-Steinberg,
-        # confirmed the right algorithm for this), matching the user's
-        # own stated preference for "minimum necessary" over a fiddly
-        # editor. 60px is a reasonable default max width for a 160px
-        # screen that likely also has sensor elements on it.
+        # confirmed the right algorithm for this) at a sane default
+        # size -- 60px is a reasonable default max width for a 160px
+        # screen that likely also has sensor elements on it. Dragging
+        # the resize handle afterward (see ScreenPreviewCanvas) reruns
+        # this exact same converter at a new target size, so quality
+        # stays consistent between import and resize.
         max_width = 60
         png_to_lcd = PROJECT_DIR / "src" / "png-to-lcd.py"
         try:
@@ -1497,6 +1679,7 @@ class CustomScreensTab(QWidget):
         elements.append({
             "kind": "image",
             "path": f"custom_screen_images/{out_path.name}",  # relative -- matches how the C side resolves it against data_dir()
+            "src": f"custom_screen_images/{src_copy_path.name}" if src_copy_path else None,
             "x": default_x, "y": default_y,
             "width": w, "height": h,
         })
@@ -1537,13 +1720,23 @@ class CustomScreensTab(QWidget):
         # on_import_image -- otherwise a second text field lands
         # exactly on top of the first, invisible until dragged away.
         default_y = (6 + 12 * text_count) % LCD_HEIGHT
-        elements.append({"kind": "text", "content": content, "x": 6, "y": default_y})
+        elements.append({
+            "kind": "text", "content": content, "x": 6, "y": default_y,
+            "font_size": self.font_size_combo.currentData(),
+        })
         save_custom_screens(self.config)
         self.refresh_elements_list()
         self.refresh_preview()
 
     def on_remove_element(self, index):
         del self.config[self.current_screen][index]
+        save_custom_screens(self.config)
+        self.refresh_elements_list()
+        self.refresh_preview()
+
+    def on_cycle_font_size(self, index):
+        el = self.config[self.current_screen][index]
+        el["font_size"] = (el.get("font_size", 0) + 1) % len(FONT_SIZE_CHOICES)
         save_custom_screens(self.config)
         self.refresh_elements_list()
         self.refresh_preview()
@@ -1566,6 +1759,47 @@ class CustomScreensTab(QWidget):
         # Same idea and same fix as on_element_dragged.
         save_custom_screens(self.config)
         self.refresh_elements_list()
+
+    def on_image_resize_requested(self, index, target_w, target_h):
+        # Deliberately NOT the same pattern as on_element_resized: a bar
+        # resize is just a number, cheap to save on every mouse-move
+        # event. An image resize has to re-run png-to-lcd.py and rewrite
+        # the .bin file on disk -- doing THAT on every raw mouse-move
+        # would spam a subprocess dozens of times a second. Instead this
+        # just records the latest target; _apply_pending_image_resize
+        # (called from refresh_preview, itself throttled to the 120ms
+        # drag timer) is what actually does the work, at a sane rate.
+        self._pending_image_resize = (index, target_w, target_h)
+
+    def _apply_pending_image_resize(self):
+        if not self._pending_image_resize:
+            return
+        index, target_w, target_h = self._pending_image_resize
+        self._pending_image_resize = None
+        elements = self.config.get(self.current_screen, [])
+        if index >= len(elements):
+            return
+        el = elements[index]
+        if el.get("kind") != "image" or not el.get("src"):
+            return
+        src_full = DATA_DIR / el["src"]
+        out_full = DATA_DIR / el["path"]
+        png_to_lcd = PROJECT_DIR / "src" / "png-to-lcd.py"
+        try:
+            result = subprocess.run(
+                [sys.executable, str(png_to_lcd), str(src_full), str(out_full), str(target_w), str(target_h)],
+                capture_output=True, text=True, timeout=15,
+            )
+        except Exception:
+            return  # a dropped resize tick isn't worth surfacing mid-drag; the next tick retries
+        if result.returncode != 0:
+            return
+        try:
+            w, h = (int(x) for x in result.stdout.split())
+        except ValueError:
+            return
+        el["width"], el["height"] = w, h
+        save_custom_screens(self.config)
 
     def on_drag_started(self):
         # Pause the 1s idle timer while the 120ms drag timer takes
@@ -1624,6 +1858,19 @@ class CustomScreensTab(QWidget):
             text.setStyleSheet("font-size: 11px;")
             row.addWidget(text)
             row.addStretch()
+            if el.get("kind") in ("sensor", "text"):
+                # Direct request: "id like to be able to resize
+                # elements". No drag handle here on purpose -- the
+                # library only has 4 discrete text sizes (no continuous
+                # scaling), so cycling through them with a click is the
+                # honest equivalent of resizing for these element kinds.
+                size_label = FONT_SIZE_CHOICES[el.get("font_size", 0)][1]
+                size_btn = QPushButton(size_label)
+                size_btn.setFixedWidth(52)
+                size_btn.setStyleSheet("padding: 1px; font-size: 10px;")
+                size_btn.setToolTip("Click to cycle text size: Small -> Medium -> Large -> Huge")
+                size_btn.clicked.connect(lambda _, idx=i: self.on_cycle_font_size(idx))
+                row.addWidget(size_btn)
             remove_btn = QPushButton("✕")
             remove_btn.setFixedWidth(24)
             remove_btn.setStyleSheet("padding: 1px;")
@@ -1635,6 +1882,11 @@ class CustomScreensTab(QWidget):
         self.elements_layout.addStretch()
 
     def refresh_preview(self):
+        # Must run BEFORE the render below: applies any pending image
+        # resize (rewrites the .bin file + el["width"/"height"]
+        # together) so the C renderer never reads a width/height that
+        # doesn't match what's actually in the file yet.
+        self._apply_pending_image_resize()
         pixmap, bounds, err = render_preview(self.screen_number(), tag="editor")
         if pixmap is None:
             print(f"Custom Screens preview error: {err}")  # surfaced in the panel below instead of blocking the canvas
@@ -1655,7 +1907,7 @@ class MainWindow(QMainWindow):
 
         tabs = QTabWidget()
         tabs.addTab(KeyboardTab(), "Backlight + G-Keys")
-        tabs.addTab(CustomScreensTab(), "Custom Screens (WIP)")
+        tabs.addTab(CustomScreensTab(), "Custom Screens")
         self.setCentralWidget(tabs)
 
         # A hardcoded resize() goes stale the moment tab content's
