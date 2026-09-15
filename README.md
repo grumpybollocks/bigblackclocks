@@ -92,3 +92,29 @@ is the short version.
 Wondering whether this actually works for anyone other than us, not
 just on our own machines? [`READY_FOR_ANYONE.md`](READY_FOR_ANYONE.md)
 covers that directly.
+
+---
+
+## The cheeky bits
+
+A few things that happened along the way worth a mention, because
+they're the kind of detail that makes a "personal project" actually
+personal:
+
+- The G510s app can show free space on a drive over its LCD like any
+  other sensor — except this one's internal name is literally "the
+  fridge" (`frigider`), because that's what the drive is actually
+  called on this machine. Fully optional, shows "N/A" gracefully on
+  any setup that isn't ours.
+- Two separate Claude Code sessions ran this whole build, one per
+  keyboard, each on its own machine, coordinating over actual messages
+  to each other — catching each other's mistakes (a compile-time path
+  fallback that still leaked a username, caught by the other session's
+  independent re-check), occasionally getting confused by each other's
+  shorthand ("Plan A/B" turned out to be a mishearing of "Phase A/B"),
+  and generally behaving like two separate contractors who occasionally
+  need to double-check they're not about to step on each other's tools.
+- "wtf are the blue squares for?" is a genuine, verbatim piece of user
+  feedback that shipped an actual UI fix (resize handles now only show
+  up when you're hovering near them, not all at once) — which is as
+  good a reminder as any that real usage beats guessing every time.
