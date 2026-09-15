@@ -271,13 +271,14 @@ echo "{rgb[0]} {rgb[1]} {rgb[2]}" > /sys/class/leds/g15::kbd_backlight/multi_int
 MAX_BRIGHTNESS = 255
 
 
-def apply_backlight(color_name):
+def apply_backlight(rgb):
     """Writes the LED sysfs files AND rewrites set-backlight-color.sh so
     this becomes the new permanent boot default (matches the behavior
-    already established by g510-backlight-apply.sh -- same contract)."""
-    rgb = COLOR_RGB.get(color_name)
-    if rgb is None:
-        return False, f"Unknown color: {color_name}"
+    already established by g510-backlight-apply.sh -- same contract).
+    Takes a real (r, g, b) tuple directly rather than a preset name --
+    the picker UI now also accepts an arbitrary hex color, not just
+    the fixed COLOR_RGB presets, so a name-keyed lookup here would
+    reject anything typed by hand."""
     try:
         (LED_DIR / "multi_intensity").write_text(f"{rgb[0]} {rgb[1]} {rgb[2]}")
         (LED_DIR / "brightness").write_text(str(MAX_BRIGHTNESS))
@@ -288,14 +289,12 @@ def apply_backlight(color_name):
     return True, None
 
 
-def set_as_default(color_name):
+def set_as_default(rgb):
     """Persist-only: updates set-backlight-color.sh (the boot default)
     WITHOUT touching the live backlight right now -- distinct from
     Apply, which does both. Lets you keep previewing other colors live
-    without losing a default you've already decided on."""
-    rgb = COLOR_RGB.get(color_name)
-    if rgb is None:
-        return False, f"Unknown color: {color_name}"
+    without losing a default you've already decided on. Same (r, g, b)
+    tuple convention as apply_backlight()."""
     write_defaults_script(rgb, MAX_BRIGHTNESS)
     return True, None
 
@@ -533,14 +532,54 @@ class KeyboardTab(QWidget):
         title.setObjectName("Title")
         panel_layout.addWidget(title)
 
-        panel_layout.addWidget(QLabel("Color:"))
-        self.color_combo = QComboBox()
-        self.color_combo.addItems(COLOR_RGB.keys())
-        for name, rgb in COLOR_RGB.items():
-            if rgb == current_rgb:
-                self.color_combo.setCurrentText(name)
-                break
-        panel_layout.addWidget(self.color_combo)
+        # Swatch-grid + hex-entry picker, matching the sibling G910
+        # app's own picker (direct request: "a colour picker like you
+        # did for g910") -- replaces the old plain dropdown. Doesn't
+        # apply anything by itself; sets self._pending_rgb, which the
+        # existing Apply/Set as Default buttons below act on, keeping
+        # G510s's own already-working live/persist distinction (G910's
+        # picker has no separate "default" concept to preserve).
+        self._pending_rgb = current_rgb or next(iter(COLOR_RGB.values()))
+
+        panel_layout.addWidget(QLabel("Color"))
+        self.preview_swatch = QLabel()
+        self.preview_swatch.setFixedHeight(26)
+        self._set_preview_style(self._pending_rgb)
+        panel_layout.addWidget(self.preview_swatch)
+
+        panel_layout.addSpacing(6)
+        panel_layout.addWidget(QLabel("<b>Hex code</b>"))
+        hex_row = QHBoxLayout()
+        self.hex_edit = QLineEdit()
+        self.hex_edit.setPlaceholderText("8000ff")
+        self.hex_edit.returnPressed.connect(self.on_apply_hex)
+        hex_apply_btn = QPushButton("Apply")
+        hex_apply_btn.setObjectName("Primary")
+        hex_apply_btn.clicked.connect(self.on_apply_hex)
+        hex_row.addWidget(self.hex_edit)
+        hex_row.addWidget(hex_apply_btn)
+        panel_layout.addLayout(hex_row)
+
+        panel_layout.addSpacing(8)
+        panel_layout.addWidget(QLabel("Presets"))
+        swatch_grid = QGridLayout()
+        swatch_grid.setSpacing(4)
+        for i, (name, rgb) in enumerate(COLOR_RGB.items()):
+            swatch_btn = QPushButton()
+            swatch_btn.setToolTip(name)
+            swatch_btn.setFixedSize(28, 28)
+            hexval = "#%02x%02x%02x" % rgb
+            swatch_btn.setStyleSheet(
+                f"background-color: {hexval}; border: 1px solid #34343a; border-radius: 4px;"
+            )
+            swatch_btn.clicked.connect(lambda _, c=rgb: self.set_pending_color(c))
+            swatch_grid.addWidget(swatch_btn, i // 3, i % 3)
+        swatch_row = QHBoxLayout()
+        swatch_row.addStretch()
+        swatch_row.addLayout(swatch_grid)
+        swatch_row.addStretch()
+        panel_layout.addLayout(swatch_row)
+        panel_layout.addSpacing(4)
 
         apply_btn = QPushButton("Apply")
         apply_btn.setObjectName("Primary")
@@ -646,16 +685,41 @@ class KeyboardTab(QWidget):
         dlg.exec_()
         self.refresh_assigned_keys()  # a macro may have been saved or cleared
 
+    def _set_preview_style(self, rgb):
+        hexval = "#%02x%02x%02x" % rgb
+        self.preview_swatch.setStyleSheet(
+            f"background-color: {hexval}; border: 1px solid #34343a; border-radius: 4px;"
+        )
+
+    def set_pending_color(self, rgb):
+        """Updates the preview swatch + what Apply/Set as Default will
+        act on -- does NOT touch the live backlight itself. Called by
+        clicking a preset swatch or a valid hex Apply, same as G910's
+        picker, but G510s keeps its own separate live/persist step
+        rather than applying instantly on every click."""
+        self._pending_rgb = rgb
+        self._set_preview_style(rgb)
+
+    def on_apply_hex(self):
+        """Exact-value path alongside the presets, for anyone who
+        already knows the hex they want or wants to match a color
+        precisely rather than pick from the fixed preset list."""
+        text = self.hex_edit.text().strip().lstrip("#")
+        if len(text) != 6 or any(c not in "0123456789abcdefABCDEF" for c in text):
+            QMessageBox.critical(self, "Invalid color", "Use 6 hex digits, e.g. 8000ff")
+            return
+        rgb = tuple(int(text[i:i + 2], 16) for i in (0, 2, 4))
+        self.set_pending_color(rgb)
+
     def on_apply(self):
-        ok, err = apply_backlight(self.color_combo.currentText())
+        ok, err = apply_backlight(self._pending_rgb)
         if not ok:
             QMessageBox.critical(self, "Error", err)
             return
-        rgb = COLOR_RGB[self.color_combo.currentText()]
-        self.canvas.set_board_color(QColor(*rgb))
+        self.canvas.set_board_color(QColor(*self._pending_rgb))
 
     def on_set_as_default(self):
-        ok, err = set_as_default(self.color_combo.currentText())
+        ok, err = set_as_default(self._pending_rgb)
         if not ok:
             QMessageBox.critical(self, "Error", err)
 

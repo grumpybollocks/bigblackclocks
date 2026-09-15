@@ -41,7 +41,14 @@ from PyQt5.QtWidgets import QWidget, QApplication
 
 CELL_PX = 32
 GUTTER_PX = 4
-PADDING_PX = 10
+# 10 -> 16: was the only real lever for the LCD panel's own top gap
+# ("add a bit more space on top and bottom so it's symmetrical") --
+# the LCD is the topmost cell on the board, so its distance to the
+# canvas edge is structurally always exactly PADDING_PX, whatever its
+# own row value is. This is the canvas's outer margin on all four
+# sides, not LCD-specific, but a uniform +6px is itself inherently
+# symmetrical and a reasonable amount of extra breathing room overall.
+PADDING_PX = 16
 
 
 @dataclass
@@ -105,8 +112,18 @@ MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 # directly for the height that makes the cell's own ratio match
 # 160/43 exactly at this width: (356 / (160/43) + 4) / 36 = 2.7688,
 # rounded to 2.77 -- not eyeballed.
+#
+# row=-3.10 (was -2.95): the top gap to the canvas edge is always
+# exactly PADDING_PX regardless of this cell's own row (see
+# PADDING_PX's comment above), so the only way to grow the BOTTOM gap
+# to match the new PADDING_PX=16 is moving this cell further up.
+# Solved empirically against the real _cell_rect() math (a first
+# hand-derived formula was off by exactly GUTTER_PX, caught by
+# actually measuring rather than trusting the arithmetic) -- row=-3.10
+# measures top=16.00px, bottom=15.88px, a 0.12px difference that isn't
+# a real one.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -2.95, 5.1, width=10.0, height=2.77, kind="lcd"),
+    Cell("_LCD", "LCD", -3.10, 5.1, width=10.0, height=2.77, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
@@ -302,7 +319,13 @@ class G510Canvas(QWidget):
             if cell.kind == "gkey" and cell.key_name in self._assigned:
                 border, pen_width = ASSIGNED_BORDER_COLOR, 2
             elif cell.kind == "gkey":
-                border, pen_width = GKEY_BORDER_COLOR, 1
+                # 2px, same weight as the LCD's own bezel ("add some
+                # of the same around the G keys too") -- keeps the
+                # existing blue accent color rather than switching to
+                # the LCD's steel-gray, since that blue is what
+                # actually signals "this is clickable" and isn't
+                # meaningful to change just for a matching outline.
+                border, pen_width = GKEY_BORDER_COLOR, 2
             elif cell.kind == "lcd":
                 border, pen_width = LCD_BORDER_COLOR, 2
             else:
