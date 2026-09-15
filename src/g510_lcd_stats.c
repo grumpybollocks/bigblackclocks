@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <unistd.h>
 #include <time.h>
 #include <sys/statvfs.h>
@@ -501,6 +502,45 @@ static void draw_stats_screen(g15canvas *canvas) {
 /* Screen 1: a simple large clock. New screens go here -- L1 cycles
    through however many screens NUM_SCREENS (in g510_lcd_buttons.c)
    currently accounts for. */
+/* Square frame (not a circle) -- direct request: "make it a square
+   ish design to fit the theme", matching this whole display's blocky
+   1-bit aesthetic (every other element on this project is a rect: bars,
+   boxes, the LCD bezel itself) rather than a circle that would need
+   anti-aliasing this display can't really do anyway. Position and size
+   aren't guessed: rendered the real clock screen via --preview and
+   scanned the actual pixel data for the rightmost lit (text) pixel --
+   x=92, leaving a real, measured 67px of empty space (x=93..159)
+   across the full 43px height, not an assumption about font metrics. */
+#define CLOCK_FACE_X1 109
+#define CLOCK_FACE_Y1 3
+#define CLOCK_FACE_X2 145
+#define CLOCK_FACE_Y2 39
+#define CLOCK_FACE_CX ((CLOCK_FACE_X1 + CLOCK_FACE_X2) / 2)
+#define CLOCK_FACE_CY ((CLOCK_FACE_Y1 + CLOCK_FACE_Y2) / 2)
+
+static void draw_analog_clock(g15canvas *c, struct tm *t) {
+    g15r_pixelBox(c, CLOCK_FACE_X1, CLOCK_FACE_Y1, CLOCK_FACE_X2, CLOCK_FACE_Y2, G15_COLOR_BLACK, 1, 0);
+
+    /* Angle 0 = 12 o'clock, increasing clockwise -- standard clock-face
+       convention. Hand length kept well inside the half-side (18px) so
+       neither hand can ever poke through the square frame, including
+       at the diagonal quadrants where a hand's own (dx,dy) can both be
+       near-maximal at once. No second hand -- kept deliberately simple
+       on a square this small, matches "square-ish" over "busy". */
+    double minute_angle = (t->tm_min / 60.0) * 2 * M_PI;
+    double hour_angle = ((t->tm_hour % 12) + t->tm_min / 60.0) / 12.0 * 2 * M_PI;
+
+    int minute_len = 15, hour_len = 10;
+    int mx = CLOCK_FACE_CX + (int)round(sin(minute_angle) * minute_len);
+    int my = CLOCK_FACE_CY - (int)round(cos(minute_angle) * minute_len);
+    int hx = CLOCK_FACE_CX + (int)round(sin(hour_angle) * hour_len);
+    int hy = CLOCK_FACE_CY - (int)round(cos(hour_angle) * hour_len);
+
+    g15r_drawLine(c, CLOCK_FACE_CX, CLOCK_FACE_CY, mx, my, G15_COLOR_BLACK);
+    g15r_drawLine(c, CLOCK_FACE_CX, CLOCK_FACE_CY, hx, hy, G15_COLOR_BLACK);
+    g15r_drawCircle(c, CLOCK_FACE_CX, CLOCK_FACE_CY, 1, 1, G15_COLOR_BLACK);
+}
+
 static void draw_clock_screen(g15canvas *c) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -510,6 +550,7 @@ static void draw_clock_screen(g15canvas *c) {
 
     g15r_G15FPrint(c, time_str, 20, 8, G15_TEXT_LARGE, G15_JUSTIFY_LEFT, G15_COLOR_BLACK, 0);
     g15r_renderString(c, (unsigned char*)date_str, 0, G15_TEXT_SMALL, 10, 30);
+    draw_analog_clock(c, t);
 }
 
 /* --- Custom Screens (v1.1): user-built dashboards for L2-L5 --- */

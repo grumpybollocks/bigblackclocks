@@ -30,7 +30,7 @@ echo "=== 3/6: Compile the C programs ==="
 # -DPROJECT_DIR bakes in THIS checkout's absolute path so the binary
 # can find its own font/config files without any file in the repo
 # itself hardcoding a username or machine-specific location.
-gcc $(pkg-config --cflags freetype2) -DPROJECT_DIR="\"$DIR\"" src/g510_lcd_stats.c -o src/g510_lcd_stats -lg15render $(pkg-config --libs freetype2)
+gcc $(pkg-config --cflags freetype2) -DPROJECT_DIR="\"$DIR\"" src/g510_lcd_stats.c -o src/g510_lcd_stats -lg15render $(pkg-config --libs freetype2) -lm
 gcc src/g510_lcd_buttons.c -o src/g510_lcd_buttons
 
 echo "=== 4/6: udev rules + hwdb (needs sudo) ==="
