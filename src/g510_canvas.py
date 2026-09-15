@@ -35,7 +35,7 @@ apply here at all).
 """
 import sys
 from dataclasses import dataclass
-from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QPointF, QSizeF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont, QPen
 from PyQt5.QtWidgets import QWidget, QApplication
 
@@ -185,6 +185,7 @@ KEY_BORDER_COLOR = QColor(10, 10, 12)
 GKEY_COLOR = QColor(58, 90, 130)            # distinct accent -- signals "clickable"
 GKEY_BORDER_COLOR = QColor(80, 130, 190)
 LCD_COLOR = QColor(70, 90, 60)               # muted screen-like tone -- visually distinct as "not a key"
+LCD_BORDER_COLOR = QColor(100, 104, 110)     # cool steel-gray bezel, distinct from every key's near-black border
 MKEY_UNSET_COLOR = QColor(50, 50, 55)
 ACTIVE_MKEY_COLOR = QColor(58, 108, 196)     # matches G910's active-profile accent
 MR_ACTIVE_COLOR = QColor(196, 70, 58)
@@ -302,6 +303,8 @@ class G510Canvas(QWidget):
                 border, pen_width = ASSIGNED_BORDER_COLOR, 2
             elif cell.kind == "gkey":
                 border, pen_width = GKEY_BORDER_COLOR, 1
+            elif cell.kind == "lcd":
+                border, pen_width = LCD_BORDER_COLOR, 2
             else:
                 border, pen_width = KEY_BORDER_COLOR, 1
             painter.setPen(QPen(border, pen_width))
@@ -319,12 +322,22 @@ class G510Canvas(QWidget):
                 # "looks blurry now"), where nearest-neighbor keeps it
                 # crisp and blocky, honestly representing what the real
                 # hardware actually looks like instead of prettifying it.
+                # A small inset so the steel-gray border reads as a
+                # real bezel framing the screen, not just an outline
+                # sitting flush against the content's own edge pixels.
+                bezel = 3
+                inner_size = (rect.size() - QSizeF(bezel * 2, bezel * 2)).toSize()
                 scaled = self._lcd_pixmap.scaled(
-                    rect.size().toSize(), Qt.KeepAspectRatio, Qt.FastTransformation
+                    inner_size, Qt.KeepAspectRatio, Qt.FastTransformation
                 )
                 px = rect.x() + (rect.width() - scaled.width()) / 2
                 py = rect.y() + (rect.height() - scaled.height()) / 2
                 painter.drawPixmap(int(px), int(py), scaled)
+                # Redrawn on top -- the pixmap above would otherwise
+                # sit over the outer edge of the border stroke just
+                # painted, dulling it right where it matters most.
+                painter.setPen(QPen(border, pen_width))
+                painter.drawPath(path)
             else:
                 painter.setPen(self._label_color(fill))
                 painter.setFont(mkey_font if cell.kind == "mkey" else font)
