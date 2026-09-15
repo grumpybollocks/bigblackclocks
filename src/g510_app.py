@@ -1337,6 +1337,26 @@ class CustomScreensTab(QWidget):
         self.bar_hint_label.setVisible(not capable)
 
     def screen_number(self):
+        # L1 used to hardcode to 1 (the clock) always -- but L1 really
+        # toggles between two real screens (stats and clock, see
+        # read_active_screen_num()'s own docstring). Direct report:
+        # "the main page preview shows L1 stats but the custom page
+        # still shows just the time" -- this tab's own "reference"
+        # preview was the one still hardcoded.
+        #
+        # Not a blind copy of read_active_screen_num() though: if the
+        # real current screen is 2-5 (some OTHER screen is live right
+        # now), showing that here would make the "L1" tab display an
+        # unrelated custom screen's content, which is wrong regardless
+        # of what's live elsewhere. g510_lcd_buttons.c's own L1 button
+        # handler (`cur >= 2 ? 0 : ...`) always resets to stats (0)
+        # when pressed from any other screen -- read directly from the
+        # real source, not assumed -- so that's the accurate answer
+        # for "what would L1 show right now" whenever L1 isn't the one
+        # currently active.
+        if self.current_screen == "L1":
+            live = read_active_screen_num()
+            return live if live in (0, 1) else 0
         return int(self.current_screen[1])  # "L2" -> 2
 
     def on_add_element(self):
