@@ -68,6 +68,19 @@ real hardware for the other keyboard.
   a real Arch package (`packaging/g910-control/`) built and verified
   locally alongside the existing git-clone installer. Merged into
   `main`.
+- `g910-v1.3` -- LICENSE added, a crash-risk fix in event-device
+  discovery (unguarded `evdev.InputDevice()` calls could crash the
+  whole app on a permission error or a device disappearing
+  mid-enumeration), and the point where G910's source got split out
+  to its own standalone public repo,
+  [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control)
+  (via `git-filter-repo` -- G910 files only, at every commit, author
+  identity corrected, no email anywhere; this repo's own history is
+  completely untouched). That new repo is what the PKGBUILD's
+  `source=` now points at, with a real `sha256sum` computed against
+  it -- the AUR-fetchability blocker that `SKIP` used to represent is
+  gone. This tag exists identically in both repos (same commit
+  content for every G910 file).
 - `g910-gui-v1` -- G910 reaching a single unified canvas-based GUI.
 - `g910-skeleton-v1-buttongrid` -- G910's pre-canvas button-grid UI,
   permanent record before the canvas rearchitecture.
