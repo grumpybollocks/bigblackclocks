@@ -441,9 +441,40 @@ static const char *disk_secondary_path(void) {
     return path;
 }
 
+/* label_font is only NULL when the commercially-licensed custom font
+   (see main()) couldn't be loaded -- no font conversion done yet, or a
+   fresh package install with nothing configured. Rather than refuse to
+   run at all, every label falls back to libg15render's own built-in
+   G15_TEXT_SMALL renderer, already used everywhere else in this file
+   for non-label text. libg15render has no public API to measure that
+   stock font's rendered width/height the way g15r_testG15FontWidth()
+   does for a loaded custom font, so the fallback numbers below are a
+   fixed approximation, not a real measurement -- layout is a few px
+   off at worst in this mode, which is an acceptable tradeoff for "runs
+   with no font at all" vs. the previous behaviour of not running. */
+#define FALLBACK_LABEL_CHAR_W 5
+#define FALLBACK_LABEL_HEIGHT 8
+
+static int label_text_width(const char *label) {
+    return label_font ? g15r_testG15FontWidth(label_font, (char*)label)
+                       : (int)strlen(label) * FALLBACK_LABEL_CHAR_W;
+}
+
+static int label_text_height(void) {
+    return label_font ? label_font->font_height : FALLBACK_LABEL_HEIGHT;
+}
+
+static void draw_label(g15canvas *c, int x, int y, const char *label) {
+    if (label_font) {
+        g15r_G15FontRenderString(c, label_font, (char*)label, 0, x, y + LABEL_Y_OFFSET, G15_COLOR_BLACK, 0);
+    } else {
+        g15r_renderString(c, (unsigned char*)label, 0, G15_TEXT_SMALL, x, y);
+    }
+}
+
 static void draw_row(g15canvas *c, int y, const char *label, int pct,
                       const char *pct_str, const char *amount, int pct_y_nudge) {
-    g15r_G15FontRenderString(c, label_font, (char*)label, 0, LABEL_X, y + LABEL_Y_OFFSET, G15_COLOR_BLACK, 0);
+    draw_label(c, LABEL_X, y, label);
     g15r_renderString(c, (unsigned char*)pct_str, 0, G15_TEXT_SMALL, PCT_X, y + pct_y_nudge);
     draw_slim_bar(c, BAR_X1, BAR_X2, y, BAR_H, pct);
     if (amount) {
@@ -982,15 +1013,15 @@ static void draw_element(g15canvas *c, element_t *el) {
     char disp[32];
     get_sensor_value(el->sensor, &pct_for_bar, disp, sizeof(disp));
 
-    g15r_G15FontRenderString(c, label_font, (char*)def->label, 0, el->x, el->y + LABEL_Y_OFFSET, G15_COLOR_BLACK, 0);
-    int label_w = g15r_testG15FontWidth(label_font, (char*)def->label);
+    draw_label(c, el->x, el->y, def->label);
+    int label_w = label_text_width(def->label);
     int value_x = el->x + label_w + 4;
 
     element_bounds_t *b = (g_element_bounds_count < MAX_ELEMENTS)
         ? &g_element_bounds[g_element_bounds_count++] : NULL;
     if (b) {
         b->label_x1 = el->x; b->label_y1 = el->y;
-        b->label_x2 = el->x + label_w; b->label_y2 = el->y + label_font->font_height;
+        b->label_x2 = el->x + label_w; b->label_y2 = el->y + label_text_height();
         b->is_bar = 0;
     }
 
@@ -1087,8 +1118,18 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
 }
 
 int main(int argc, char **argv) {
+    /* A missing/unconvertible custom font is not fatal -- draw_label()/
+       label_text_width()/label_text_height() all fall back to
+       libg15render's built-in stock font whenever label_font is NULL,
+       so the app stays fully usable (just with plainer labels) on a
+       fresh install with no font configured yet, instead of refusing
+       to start at all. */
     label_font = g15r_loadG15Font((char*)font_path());
-    if (!label_font) { fprintf(stderr, "failed to load custom font\n"); return 1; }
+    if (!label_font) {
+        fprintf(stderr, "g510-lcd-stats: no custom label font configured (see "
+                         "README's FONTS section) -- using the stock font for "
+                         "labels instead\n");
+    }
 
     /* One-shot preview mode: render a single screen to an image file
        through the exact same drawing code as the live LCD, then exit.
