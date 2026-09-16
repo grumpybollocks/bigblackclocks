@@ -7,17 +7,19 @@ import sys
 import re
 from PIL import Image
 
-if len(sys.argv) != 4:
-    print("usage: png-to-lcd.py <input.png> <output.bin> <max_width>")
+if len(sys.argv) != 5:
+    print("usage: png-to-lcd.py <input.png> <output.bin> <max_width> <max_height>")
     sys.exit(1)
 
-infile, outfile, max_width = sys.argv[1], sys.argv[2], int(sys.argv[3])
+infile, outfile, max_width, max_height = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 
 img = Image.open(infile).convert("L")  # grayscale first
 w, h = img.size
-if w > max_width:
-    ratio = max_width / w
-    img = img.resize((max_width, int(h * ratio)))
+# fit within max_width x max_height (never upscale) -- a tall/narrow source
+# image constrained only by width could still end up taller than the LCD
+ratio = min(max_width / w, max_height / h, 1.0)
+if ratio < 1.0:
+    img = img.resize((max(1, int(w * ratio)), max(1, int(h * ratio))))
     w, h = img.size
 
 img = img.convert("1")  # dithered 1-bit conversion

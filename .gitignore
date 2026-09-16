@@ -19,3 +19,6 @@ custom_screen_images/*.bin
 # leftovers and are no longer read/written by the app.
 g910_profiles.json
 g910_macros.json
+
+# Claude Code's own worktree bookkeeping -- not project content
+.claude/

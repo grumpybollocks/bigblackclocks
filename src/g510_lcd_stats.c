@@ -13,9 +13,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <unistd.h>
 #include <time.h>
 #include <sys/statvfs.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 /* Exact port of libg15's dumpPixmapIntoLCDFormat(): converts libg15render's
    row-major MSB-first bitmap into the LCD's vertical "page" wire format. */
@@ -62,7 +65,20 @@ static void send_frame(g15canvas *canvas) {
    what the real LCD would show, using the identical drawing code path.
    Colors are tinted to evoke the real G510's green-on-black panel. */
 static void write_ppm(g15canvas *c, const char *path) {
-    FILE *f = fopen(path, "wb");
+    /* Written to path+".tmp" then rename()'d into place atomically --
+       a real screenshot caught the reader side (render_preview() in
+       g510_app.py) showing two different frames' content visibly
+       overlapping in one image, exactly what a torn read of a
+       direct in-place fopen(path,"wb") can produce if a reader opens
+       the file mid-write. rename() on POSIX is atomic when source and
+       destination share a filesystem (always true here, both under
+       the same /tmp path a caller passed in), so any concurrent
+       reader sees either the complete old file or the complete new
+       one, never a mix -- true regardless of exactly what triggers
+       the overlap, which wasn't fully pinned down. */
+    char tmp_path[300];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+    FILE *f = fopen(tmp_path, "wb");
     if (!f) { perror("open preview output"); return; }
     fprintf(f, "P6\n%d %d\n255\n", G15_LCD_WIDTH, G15_LCD_HEIGHT);
     for (int y = 0; y < G15_LCD_HEIGHT; y++) {
@@ -75,6 +91,7 @@ static void write_ppm(g15canvas *c, const char *path) {
         }
     }
     fclose(f);
+    rename(tmp_path, path);
 }
 
 /* --- stat readers --- */
@@ -293,16 +310,130 @@ static g15font *label_font = NULL;
 #ifndef PROJECT_DIR
 #error "PROJECT_DIR not defined -- compile via install.sh or scripts/rebuild.sh, or pass -DPROJECT_DIR='\"/your/checkout/path\"' yourself"
 #endif
-#define FONT_PATH PROJECT_DIR "/fonts/lcd-label-8.fnt"
-#define CUSTOM_SCREENS_PATH PROJECT_DIR "/custom_screens.txt"
+/* Checks ~/.local/share/g510-lcd/fonts/ first (always user-writable,
+   works identically whether this binary is a dev checkout or a real
+   package under root-owned /usr/lib/g510-lcd) before falling back to
+   the PROJECT_DIR-relative path (keeps working for anyone who already
+   has their converted font sitting in a dev checkout, no migration
+   needed -- the fallback is permanent, not a one-time transition).
+   Can't ship the font itself either way (commercial license), so this
+   doesn't remove the manual conversion step -- it just means that
+   step no longer needs sudo for a packaged install. */
+#define FONT_PATH_FALLBACK PROJECT_DIR "/fonts/lcd-label-8.fnt"
+/* font_path() itself is defined further down, right after data_dir()
+   -- it calls data_dir(), which needs to exist first. */
 
-/* This one's tied to an actual mounted drive on the machine this was
-   built for, not just a username baked in for no reason -- there's no
-   portable "right" answer to substitute. EDIT THIS for your own setup
-   if the DISK_FRIGIDER_PCT sensor matters to you (or just don't use
-   that sensor -- it already handles the path not existing by showing
-   "N/A" rather than crashing). */
-#define DISK_FRIGIDER_PATH "/run/media/alextria/frigider"
+/* Your own custom-screens config and imported images live under
+   ~/.local/share/g510-lcd, independent of where the program itself is
+   installed from (a dev checkout via install.sh, or a real package
+   under a fixed /usr/lib/g510-lcd) -- so a package upgrade (root-owned,
+   read-only /usr/lib) never touches what you've actually configured.
+   Mirrors button_log_path() in g510_lcd_buttons.c. On first run after
+   upgrading from a version that stored these directly under
+   PROJECT_DIR, migrate the old files over once rather than silently
+   showing "not configured" on a screen that was actually already set
+   up -- migrate_file_if_needed()/migrate_dir_if_needed() are no-ops
+   whenever there's nothing old to migrate (a real package install,
+   or a dev checkout that's already been migrated once). */
+/* Plain mkdir() only creates one level -- ~/.local/share doesn't
+   necessarily exist yet on every system (confirmed the hard way: an
+   isolated test with a fresh, empty $HOME silently failed to create
+   ~/.local/share/g510-lcd because mkdir() can't create the missing
+   ~/.local and ~/.local/share parents in one call). Walks the path
+   one "/"-separated component at a time, creating each as needed. */
+static void mkdir_p(const char *path) {
+    char tmp[256];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+
+static void migrate_file_if_needed(const char *old_path, const char *new_path) {
+    FILE *already = fopen(new_path, "r");
+    if (already) { fclose(already); return; }
+    FILE *src = fopen(old_path, "r");
+    if (!src) return;
+    FILE *dst = fopen(new_path, "w");
+    if (!dst) { fclose(src); return; }
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) fwrite(buf, 1, n, dst);
+    fclose(src);
+    fclose(dst);
+}
+
+static void migrate_dir_if_needed(const char *old_dir, const char *new_dir) {
+    DIR *d = opendir(old_dir);
+    if (!d) return;
+    mkdir_p(new_dir);
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        char old_path[512], new_path[512];
+        snprintf(old_path, sizeof(old_path), "%s/%s", old_dir, entry->d_name);
+        snprintf(new_path, sizeof(new_path), "%s/%s", new_dir, entry->d_name);
+        migrate_file_if_needed(old_path, new_path);
+    }
+    closedir(d);
+}
+
+static const char *data_dir(void) {
+    static char dir[200];
+    static int ready = 0;
+    if (!ready) {
+        const char *home = getenv("HOME");
+        snprintf(dir, sizeof(dir), "%s/.local/share/g510-lcd", home ? home : "/tmp");
+        mkdir_p(dir);
+
+        char old_screens[256], new_screens[256];
+        snprintf(old_screens, sizeof(old_screens), "%s/custom_screens.txt", PROJECT_DIR);
+        snprintf(new_screens, sizeof(new_screens), "%s/custom_screens.txt", dir);
+        migrate_file_if_needed(old_screens, new_screens);
+
+        char old_images[256], new_images[256];
+        snprintf(old_images, sizeof(old_images), "%s/custom_screen_images", PROJECT_DIR);
+        snprintf(new_images, sizeof(new_images), "%s/custom_screen_images", dir);
+        migrate_dir_if_needed(old_images, new_images);
+
+        ready = 1;
+    }
+    return dir;
+}
+
+static const char *font_path(void) {
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/fonts/lcd-label-8.fnt", data_dir());
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return path; }
+    return FONT_PATH_FALLBACK;
+}
+
+static const char *custom_screens_path(void) {
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/custom_screens.txt", data_dir());
+    return path;
+}
+
+/* A drive labeled "frigider", auto-mounted by udisks2 at the standard
+   /run/media/$USER/<label> convention -- inherently tied to one
+   person's own storage setup, not something a generic sensor name can
+   avoid. Built at runtime from $USER rather than baked in at compile
+   time (same reasoning as button_log_path() in g510_lcd_buttons.c), so
+   this file doesn't hardcode a username. On a machine without this
+   exact drive, get_disk_percent() already handles the path not
+   existing by showing "N/A" rather than crashing. */
+static const char *disk_frigider_path(void) {
+    static char path[256];
+    const char *user = getenv("USER");
+    snprintf(path, sizeof(path), "/run/media/%s/frigider", user ? user : "nobody");
+    return path;
+}
 
 static void draw_row(g15canvas *c, int y, const char *label, int pct,
                       const char *pct_str, const char *amount, int pct_y_nudge) {
@@ -371,6 +502,123 @@ static void draw_stats_screen(g15canvas *canvas) {
 /* Screen 1: a simple large clock. New screens go here -- L1 cycles
    through however many screens NUM_SCREENS (in g510_lcd_buttons.c)
    currently accounts for. */
+/* Square-ish frame with rounded corners (g15r_drawRoundBox, not a
+   plain pixelBox) -- direct refinement request: "the clock is too
+   rough, i want rounded corners a bit". Position/size still grounded
+   in the real measured empty space (rendered --preview, scanned pixel
+   data: text ends at x=92, so x1=107 leaves a real 15px gap, not
+   guessed) but grown from the first pass's 36x36 to 40x40 -- fitting
+   3-character roman numerals (XII/III measured at 11px wide) AND
+   clearly-separated hands needed more room than the original size
+   had, confirmed by the numeral-position math below actually working
+   out with real margins, not by eyeballing it. */
+#define CLOCK_FACE_X1 107
+#define CLOCK_FACE_Y1 1
+#define CLOCK_FACE_X2 147
+#define CLOCK_FACE_Y2 41
+#define CLOCK_FACE_CX ((CLOCK_FACE_X1 + CLOCK_FACE_X2) / 2)
+#define CLOCK_FACE_CY ((CLOCK_FACE_Y1 + CLOCK_FACE_Y2) / 2)
+
+/* Hand-drawn I/V/X strokes -- direct refinement request: "could we do
+   the roman numerals JUST A BIT SMALLER?". G15_TEXT_SMALL (used for
+   the first pass) is already the smallest built-in bitmap font this
+   library ships (confirmed: only SMALL/MED/LARGE/HUGE exist, checked
+   the header) -- there's no smaller size to ask it for. Roman
+   numerals only ever need three shapes (I/V/X), each a trivial
+   straight-line composition, so drawing them directly with
+   g15r_drawLine at a chosen size is both smaller AND crisper on a
+   1-bit display than shrinking a bitmap or antialiased TTF glyph
+   would be (no half-lit pixels to go muddy at tiny sizes). */
+#define ROMAN_GLYPH_H 4
+
+static int roman_glyph_width(char ch) {
+    return (ch == 'I') ? 1 : 3;
+}
+
+static void draw_roman_glyph(g15canvas *c, char ch, int x, int y) {
+    switch (ch) {
+        case 'I':
+            g15r_drawLine(c, x, y, x, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+        case 'V':
+            g15r_drawLine(c, x, y, x + 1, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            g15r_drawLine(c, x + 2, y, x + 1, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+        case 'X':
+            g15r_drawLine(c, x, y, x + 2, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            g15r_drawLine(c, x + 2, y, x, y + ROMAN_GLYPH_H - 1, G15_COLOR_BLACK);
+            break;
+    }
+}
+
+/* cx/cy = the numeral's own center point (same 12px-radius circle
+   used before) -- computes the real composed width from the actual
+   glyphs being drawn (1px gap between characters) so it's centered
+   exactly, not approximated. */
+static void draw_roman_numeral(g15canvas *c, const char *s, int cx, int cy) {
+    int len = (int)strlen(s);
+    int w = 0;
+    for (int i = 0; i < len; i++) {
+        w += roman_glyph_width(s[i]);
+        if (i < len - 1) w += 1;
+    }
+    int x = cx - w / 2;
+    int y = cy - ROMAN_GLYPH_H / 2;
+    for (int i = 0; i < len; i++) {
+        draw_roman_glyph(c, s[i], x, y);
+        x += roman_glyph_width(s[i]) + 1;
+    }
+}
+
+static void draw_analog_clock(g15canvas *c, struct tm *t) {
+    g15r_drawRoundBox(c, CLOCK_FACE_X1, CLOCK_FACE_Y1, CLOCK_FACE_X2, CLOCK_FACE_Y2, 0, G15_COLOR_BLACK);
+
+    /* Roman numerals at 12/3/6/9 -- direct request: "some roman
+       numerals at 12 3 6 9 oclock", later refined ("JUST A BIT
+       SMALLER") to these hand-drawn I/V/X strokes -- see
+       draw_roman_numeral above. Each numeral is centered on its own
+       point on the same 12px-radius circle used since the first pass. */
+    draw_roman_numeral(c, "XII", CLOCK_FACE_CX, CLOCK_FACE_CY - 12);
+    draw_roman_numeral(c, "III", CLOCK_FACE_CX + 12, CLOCK_FACE_CY);
+    draw_roman_numeral(c, "VI",  CLOCK_FACE_CX, CLOCK_FACE_CY + 12);
+    draw_roman_numeral(c, "IX",  CLOCK_FACE_CX - 12, CLOCK_FACE_CY);
+
+    /* Small tick marks at the other 8 hours -- direct request: "with
+       small lines in between". Same angle convention as the hands
+       (0 = 12 o'clock, clockwise), radius 15-18 -- inside the rounded
+       frame (half-side 20) but clear of the numeral zone (numeral
+       centers sit at radius 12, half-height ~2.5, so nothing there
+       extends past radius ~15). Skips hours 12/3/6/9 -- already
+       labeled with numerals, a tick there would just clutter them. */
+    for (int hour = 1; hour <= 12; hour++) {
+        if (hour == 12 || hour == 3 || hour == 6 || hour == 9) continue;
+        double angle = (hour / 12.0) * 2 * M_PI;
+        int x1 = CLOCK_FACE_CX + (int)round(sin(angle) * 15);
+        int y1 = CLOCK_FACE_CY - (int)round(cos(angle) * 15);
+        int x2 = CLOCK_FACE_CX + (int)round(sin(angle) * 18);
+        int y2 = CLOCK_FACE_CY - (int)round(cos(angle) * 18);
+        g15r_drawLine(c, x1, y1, x2, y2, G15_COLOR_BLACK);
+    }
+
+    /* Hands -- lengths kept clearly under the numeral radius (12) so
+       neither hand ever visually overlaps a numeral, including at
+       :15/:45 (minute hand pointing exactly at III/IX) or 3:00/9:00
+       (hour hand pointing exactly at III/IX). No second hand --
+       deliberately simple on a square this small. */
+    double minute_angle = (t->tm_min / 60.0) * 2 * M_PI;
+    double hour_angle = ((t->tm_hour % 12) + t->tm_min / 60.0) / 12.0 * 2 * M_PI;
+
+    int minute_len = 9, hour_len = 6;
+    int mx = CLOCK_FACE_CX + (int)round(sin(minute_angle) * minute_len);
+    int my = CLOCK_FACE_CY - (int)round(cos(minute_angle) * minute_len);
+    int hx = CLOCK_FACE_CX + (int)round(sin(hour_angle) * hour_len);
+    int hy = CLOCK_FACE_CY - (int)round(cos(hour_angle) * hour_len);
+
+    g15r_drawLine(c, CLOCK_FACE_CX, CLOCK_FACE_CY, mx, my, G15_COLOR_BLACK);
+    g15r_drawLine(c, CLOCK_FACE_CX, CLOCK_FACE_CY, hx, hy, G15_COLOR_BLACK);
+    g15r_drawCircle(c, CLOCK_FACE_CX, CLOCK_FACE_CY, 1, 1, G15_COLOR_BLACK);
+}
+
 static void draw_clock_screen(g15canvas *c) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -378,8 +626,17 @@ static void draw_clock_screen(g15canvas *c) {
     strftime(time_str, sizeof(time_str), "%H:%M:%S", t);
     strftime(date_str, sizeof(date_str), "%A, %d %B", t);
 
-    g15r_G15FPrint(c, time_str, 20, 8, G15_TEXT_LARGE, G15_JUSTIFY_LEFT, G15_COLOR_BLACK, 0);
-    g15r_renderString(c, (unsigned char*)date_str, 0, G15_TEXT_SMALL, 10, 30);
+    /* Direct request: "move the digital clock a bit down and the date
+       a bit up so theyre not so far away from eachother". Measured the
+       real gap first (rendered --preview, scanned lit pixel rows in
+       the left/digital-clock column): time occupied rows 8-14, date
+       rows 30-35, a 15px empty gap between them (rows 15-29). Moved
+       each 4px toward the other -- time to y=12 (rows 12-18), date to
+       y=26 (rows 26-31) -- shrinking the gap to 7px while staying well
+       clear of the screen edges (top/bottom) and each other. */
+    g15r_G15FPrint(c, time_str, 20, 12, G15_TEXT_LARGE, G15_JUSTIFY_LEFT, G15_COLOR_BLACK, 0);
+    g15r_renderString(c, (unsigned char*)date_str, 0, G15_TEXT_SMALL, 10, 26);
+    draw_analog_clock(c, t);
 }
 
 /* --- Custom Screens (v1.1): user-built dashboards for L2-L5 --- */
@@ -485,7 +742,7 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
     } else if (strcmp(key, "DISK_FRIGIDER_PCT") == 0) {
-        double v = get_disk_percent(DISK_FRIGIDER_PATH);
+        double v = get_disk_percent(disk_frigider_path());
         if (v < 0) snprintf(disp, displen, "N/A");
         else { *pct_for_bar = v; snprintf(disp, displen, "%d%%", (int)(v + 0.5)); }
     } else if (strcmp(key, "UPTIME") == 0) {
@@ -519,6 +776,9 @@ typedef struct {
     char style[8]; /* "number" or "bar" */
     int x, y;
     int width; /* bar length in px, only meaningful for style="bar" -- ignored for "number" */
+    int font_size; /* G15_TEXT_SMALL(0)/MED(1)/LARGE(2)/HUGE(3) -- the VALUE
+                       text only; the sensor label always uses the fixed
+                       custom label_font, same as before this was added. */
 } element_t;
 
 /* A converted-to-1bpp image placed on a custom screen -- see
@@ -530,15 +790,33 @@ typedef struct {
    image's own aspect ratio; only position (x, y) is editable, via the
    same drag mechanic as sensor elements. */
 typedef struct {
-    char path[128]; /* relative to PROJECT_DIR, e.g. "custom_screen_images/logo.bin" */
+    char path[128]; /* relative to data_dir(), e.g. "custom_screen_images/logo.bin" */
     int x, y, width, height;
 } image_t;
+
+/* Freeform user text -- not tied to any sensor, direct request: "L3 L4
+   L5 have hard coded text i cant edit move do anything with. add an
+   option for me to add text fields too" (referring to the "not set up
+   yet" placeholder, correctly identified as non-editable by design --
+   this is the real, editable alternative). Spaces are stored as
+   underscores in custom_screens.txt (encoded/decoded entirely in
+   Python and here) rather than teaching the existing simple
+   space-delimited line parser to handle quoted strings -- keeps the
+   parser exactly as simple as it already is for ELEMENT/IMAGE lines. */
+#define MAX_TEXTS 4 /* small screen, plenty for freeform labels */
+typedef struct {
+    char content[48];
+    int x, y;
+    int font_size; /* G15_TEXT_SMALL(0)/MED(1)/LARGE(2)/HUGE(3) */
+} text_t;
 
 typedef struct {
     element_t elements[MAX_ELEMENTS];
     int count;
     image_t images[MAX_IMAGES];
     int image_count;
+    text_t texts[MAX_TEXTS];
+    int text_count;
 } custom_screen_t;
 
 static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
@@ -547,11 +825,25 @@ static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
    edits made live in the GUI show up on the next frame without needing
    the daemon restarted. */
 static void load_custom_screens(void) {
+    /* Real bug found while adding font-size support to this function:
+       text_count was never reset here, unlike count and image_count.
+       Harmless for the one-shot --preview mode (a fresh process always
+       starts from a zero-initialized static array), but in the live
+       LCD loop -- which reloads this file every 1-2s in the SAME
+       long-running process -- editing or removing a text element while
+       the service is running would append fresh entries past the
+       stale old ones instead of replacing them, since parsing always
+       starts writing at index cs->text_count. Never visibly hit yet
+       (the real custom_screens.txt had zero TEXT lines until tonight),
+       but would have shown as ghost/duplicate text on the real keyboard
+       the moment text elements were actually used without a service
+       restart in between. */
     for (int i = 0; i < MAX_CUSTOM_SCREENS; i++) {
         custom_screens[i].count = 0;
         custom_screens[i].image_count = 0;
+        custom_screens[i].text_count = 0;
     }
-    FILE *f = fopen(CUSTOM_SCREENS_PATH, "r");
+    FILE *f = fopen(custom_screens_path(), "r");
     if (!f) return;
     char line[256];
     int current = -1;
@@ -568,6 +860,7 @@ static void load_custom_screens(void) {
             el->sensor[0] = 0; el->style[0] = 0; el->x = 0; el->y = 0;
             el->width = 40; /* matches the previous hardcoded bar length -- old
                                 config lines with no width= keep looking identical */
+            el->font_size = G15_TEXT_SMALL; /* old lines with no font= keep looking identical */
             char rest[256];
             strncpy(rest, line + 8, sizeof(rest) - 1);
             rest[sizeof(rest) - 1] = 0;
@@ -575,11 +868,15 @@ static void load_custom_screens(void) {
             while (tok) {
                 char key[32], val[64];
                 if (sscanf(tok, "%31[^=]=%63s", key, val) == 2) {
-                    if (strcmp(key, "sensor") == 0) strncpy(el->sensor, val, sizeof(el->sensor) - 1);
-                    else if (strcmp(key, "style") == 0) strncpy(el->style, val, sizeof(el->style) - 1);
+                    if (strcmp(key, "sensor") == 0) { strncpy(el->sensor, val, sizeof(el->sensor) - 1); el->sensor[sizeof(el->sensor) - 1] = 0; }
+                    else if (strcmp(key, "style") == 0) { strncpy(el->style, val, sizeof(el->style) - 1); el->style[sizeof(el->style) - 1] = 0; }
                     else if (strcmp(key, "x") == 0) el->x = atoi(val);
                     else if (strcmp(key, "y") == 0) el->y = atoi(val);
                     else if (strcmp(key, "width") == 0) el->width = atoi(val);
+                    else if (strcmp(key, "font") == 0) {
+                        int f = atoi(val);
+                        el->font_size = (f >= G15_TEXT_SMALL && f <= G15_TEXT_HUGE) ? f : G15_TEXT_SMALL;
+                    }
                 }
                 tok = strtok(NULL, " ");
             }
@@ -596,7 +893,7 @@ static void load_custom_screens(void) {
             while (tok) {
                 char key[32], val[192];
                 if (sscanf(tok, "%31[^=]=%191s", key, val) == 2) {
-                    if (strcmp(key, "path") == 0) strncpy(im->path, val, sizeof(im->path) - 1);
+                    if (strcmp(key, "path") == 0) { strncpy(im->path, val, sizeof(im->path) - 1); im->path[sizeof(im->path) - 1] = 0; }
                     else if (strcmp(key, "x") == 0) im->x = atoi(val);
                     else if (strcmp(key, "y") == 0) im->y = atoi(val);
                     else if (strcmp(key, "width") == 0) im->width = atoi(val);
@@ -604,7 +901,39 @@ static void load_custom_screens(void) {
                 }
                 tok = strtok(NULL, " ");
             }
-            if (im->path[0] && im->width > 0 && im->height > 0) cs->image_count++;
+            /* clamp to screen bounds -- guards against a hand-edited config
+               (this format is deliberately hand-editable) requesting a
+               malloc/fread far larger than the 160x43 screen could ever need */
+            if (im->path[0] && im->width > 0 && im->width <= G15_LCD_WIDTH &&
+                im->height > 0 && im->height <= G15_LCD_HEIGHT) cs->image_count++;
+        } else if (strncmp(line, "TEXT ", 5) == 0 && current >= 0) {
+            custom_screen_t *cs = &custom_screens[current];
+            if (cs->text_count >= MAX_TEXTS) continue;
+            text_t *tx = &cs->texts[cs->text_count];
+            tx->content[0] = 0; tx->x = 0; tx->y = 0;
+            tx->font_size = G15_TEXT_SMALL; /* old lines with no font= keep looking identical */
+            char rest[256];
+            strncpy(rest, line + 5, sizeof(rest) - 1);
+            rest[sizeof(rest) - 1] = 0;
+            char *tok = strtok(rest, " ");
+            while (tok) {
+                char key[32], val[192];
+                if (sscanf(tok, "%31[^=]=%191s", key, val) == 2) {
+                    if (strcmp(key, "content") == 0) {
+                        strncpy(tx->content, val, sizeof(tx->content) - 1);
+                        tx->content[sizeof(tx->content) - 1] = 0;
+                        for (char *p = tx->content; *p; p++) if (*p == '_') *p = ' ';
+                    }
+                    else if (strcmp(key, "x") == 0) tx->x = atoi(val);
+                    else if (strcmp(key, "y") == 0) tx->y = atoi(val);
+                    else if (strcmp(key, "font") == 0) {
+                        int f = atoi(val);
+                        tx->font_size = (f >= G15_TEXT_SMALL && f <= G15_TEXT_HUGE) ? f : G15_TEXT_SMALL;
+                    }
+                }
+                tok = strtok(NULL, " ");
+            }
+            if (tx->content[0]) cs->text_count++;
         }
     }
     fclose(f);
@@ -655,14 +984,14 @@ static void draw_element(g15canvas *c, element_t *el) {
         int bar_x1 = value_x;
         int bar_x2 = bar_x1 + el->width;
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
-        g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, bar_x2 + 4, el->y);
+        g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, bar_x2 + 4, el->y);
         if (b) {
             b->is_bar = 1;
             b->bar_x1 = bar_x1; b->bar_x2 = bar_x2;
             b->bar_y1 = el->y; b->bar_y2 = el->y + BAR_H;
         }
     } else {
-        g15r_renderString(c, (unsigned char*)disp, 0, G15_TEXT_SMALL, value_x, el->y);
+        g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, value_x, el->y);
     }
 }
 
@@ -670,9 +999,14 @@ static void draw_element(g15canvas *c, element_t *el) {
    per element in the same order load_custom_screens() produced them
    (matches the GUI's own element list index-for-index). */
 static void write_bounds_meta(const char *outpath) {
-    char meta_path[300];
+    /* Same atomic tmp+rename() pattern as write_ppm() above, same
+       reasoning -- a stale/mismatched .meta read wouldn't show visible
+       image corruption, just wrong hit-testing, but it's the same
+       class of torn-read risk against the same reader. */
+    char meta_path[300], tmp_path[310];
     snprintf(meta_path, sizeof(meta_path), "%s.meta", outpath);
-    FILE *f = fopen(meta_path, "w");
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", meta_path);
+    FILE *f = fopen(tmp_path, "w");
     if (!f) return;
     for (int i = 0; i < g_element_bounds_count; i++) {
         element_bounds_t *b = &g_element_bounds[i];
@@ -686,6 +1020,7 @@ static void write_bounds_meta(const char *outpath) {
         }
     }
     fclose(f);
+    rename(tmp_path, meta_path);
 }
 
 /* Loads a converted 1bpp image (see src/png-to-lcd.py) and draws it via
@@ -696,7 +1031,7 @@ static void write_bounds_meta(const char *outpath) {
    rather than crashing the whole screen over one missing image. */
 static void draw_image_element(g15canvas *c, image_t *im) {
     char full_path[300];
-    snprintf(full_path, sizeof(full_path), "%s/%s", PROJECT_DIR, im->path);
+    snprintf(full_path, sizeof(full_path), "%s/%s", data_dir(), im->path);
     FILE *f = fopen(full_path, "rb");
     if (!f) return;
     long expected = (long)((im->width + 7) / 8) * im->height;
@@ -710,23 +1045,31 @@ static void draw_image_element(g15canvas *c, image_t *im) {
     free(data);
 }
 
+static void draw_text_element(g15canvas *c, text_t *tx) {
+    g15r_renderString(c, (unsigned char*)tx->content, 0, tx->font_size, tx->x, tx->y);
+}
+
 static void draw_custom_screen(g15canvas *c, int screen_num) {
     g_element_bounds_count = 0;
     load_custom_screens();
     custom_screen_t *cs = &custom_screens[screen_num - 2];
-    if (cs->count == 0 && cs->image_count == 0) {
-        char label[8];
-        snprintf(label, sizeof(label), "L%d", screen_num);
-        g15r_G15FPrint(c, label, 0, 8, G15_TEXT_LARGE, G15_JUSTIFY_CENTER, G15_COLOR_BLACK, 0);
-        g15r_renderString(c, (unsigned char*)"not set up yet", 0, G15_TEXT_SMALL, 24, 30);
+    /* Direct request: "this placeholder text on l3 l4 l5 gone" -- the
+       "L3 / not set up yet" label used to be drawn here whenever a
+       screen was genuinely empty. Confirmed via a real screenshot that
+       it read as permanently stuck/hardcoded content rather than an
+       honest empty-state indicator, so an unconfigured screen now just
+       draws nothing -- matches what the real LCD should show for a
+       screen with nothing on it. */
+    if (cs->count == 0 && cs->image_count == 0 && cs->text_count == 0) {
         return;
     }
     for (int i = 0; i < cs->count; i++) draw_element(c, &cs->elements[i]);
     for (int i = 0; i < cs->image_count; i++) draw_image_element(c, &cs->images[i]);
+    for (int i = 0; i < cs->text_count; i++) draw_text_element(c, &cs->texts[i]);
 }
 
 int main(int argc, char **argv) {
-    label_font = g15r_loadG15Font(FONT_PATH);
+    label_font = g15r_loadG15Font((char*)font_path());
     if (!label_font) { fprintf(stderr, "failed to load custom font\n"); return 1; }
 
     /* One-shot preview mode: render a single screen to an image file
