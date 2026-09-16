@@ -46,14 +46,14 @@ confirmed directly rather than assumed:
 ## sha256sums: resolved
 
 `sha256sums` is a real hash now, not `SKIP` -- computed by actually
-downloading the `g910-v1.3` tag archive from the now-public
+downloading the `g910-v1.4` tag archive from the now-public
 `grumpybollocks/g910-control` repo and hashing it directly
 (`sha256sum`), not copied or guessed.
 
 ## Local build + verification (what's actually been done)
 
 1. `makepkg` against the real public URL
-   (`https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.3.tar.gz`)
+   (`https://github.com/grumpybollocks/g910-control/archive/refs/tags/g910-v1.4.tar.gz`)
    -- downloads, hash-validates, and builds clean, no local-tarball
    workaround needed anymore now that the source is genuinely public.
 2. `pacman -U` installed for real on this machine. Confirmed:

@@ -9,7 +9,7 @@ Spectrum** (per-key RGB/macros).
 ![Python](https://img.shields.io/badge/python-3-blue.svg)
 ![Platform: Arch Linux](https://img.shields.io/badge/platform-Arch%20Linux-1793d1.svg)
 ![G510s: work in progress](https://img.shields.io/badge/G510s-work%20in%20progress-orange.svg)
-![G910: v1.3 stable](https://img.shields.io/badge/G910-v1.3%20stable-brightgreen.svg)
+![G910: v1.4 stable](https://img.shields.io/badge/G910-v1.4%20stable-brightgreen.svg)
 
 ## Status, plainly
 
@@ -18,7 +18,7 @@ Spectrum** (per-key RGB/macros).
 - **G510s**: work in progress (see the table below) — not tagged, not
   packaged for real installs beyond local testing, no live-hardware
   confirmation yet.
-- **G910**: stable and tagged (`g910-v1.3`). Its source has been split
+- **G910**: stable and tagged (`g910-v1.4`). Its source has been split
   out to a separate **public** repo,
   [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control)
   (G910 only — nothing about G510s is in it, ever, at any point in its
@@ -60,7 +60,7 @@ replugs, and kernel updates. Does what it says on the tin.
 | Keyboard | Branch | What it does |
 | --- | --- | --- |
 | **G510s** | `main` (`v1.0`) / **`g510s-dev`** (active work) | **Work in progress** — `main` has the tagged, confirmed `v1.0` (LCD stats, backlight, G-key macros). Everything since has been built and self-tested (including several rounds of self-audit bug-fixing) on `g510s-dev`, not merged here yet: the Custom Screens dashboard builder for L2-L5 (drag sensors, PNG images, and freeform text onto a live preview, resizable images, per-element text sizing), a live analog clock on L1, the Backlight + G-Keys canvas rearchitecture, a real Arch package (`packaging/g510-lcd/`), and a full split of your own data (screens/macros/images) into `~/.local/share/g510-lcd`, independent of wherever the app itself is installed from. Nothing on `g510s-dev` gets tagged or merged until it's physically confirmed on the real keyboard — that's this project's standing rule, not a delay. |
-| **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. A compact colour picker (real named presets + a hex field, no fiddly gradient square) sits alongside saving/loading whole lighting setups (any number of them, scrolls properly). Device paths are discovered at runtime by matching the actual hardware (vendor/product ID), not a hardcoded path tied to one specific physical keyboard — works on any G910, not just the one it was built on. Comes with its own installer and desktop shortcut, plus a real Arch package (`packaging/g910-control/`) as a second, from-scratch-packaged way to install it. Tagged `g910-v1.3`. Source also lives standalone and public at [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control) (that's what the PKGBUILD's `source=` actually points at now). Further G910 work happens on the `g910` branch — see [`G910: the short version`](#g910-the-short-version) below for the deep-dive docs. |
+| **G910 Orion Spectrum** | `main` (this branch) | One tidy window built around a proper on-screen render of the keyboard — click any key to colour it, click a cluster to jump to that zone, and M1/M2/M3/MR are real clickable bits of the picture, not just labels. A compact colour picker (real named presets + a hex field, no fiddly gradient square) sits alongside saving/loading whole lighting setups (any number of them, scrolls properly). Device paths are discovered at runtime by matching the actual hardware (vendor/product ID), not a hardcoded path tied to one specific physical keyboard — works on any G910, not just the one it was built on. Comes with its own installer and desktop shortcut, plus a real Arch package (`packaging/g910-control/`) as a second, from-scratch-packaged way to install it. Tagged `g910-v1.4`. Source also lives standalone and public at [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control) (that's what the PKGBUILD's `source=` actually points at now). Further G910 work happens on the `g910` branch — see [`G910: the short version`](#g910-the-short-version) below for the deep-dive docs. |
 
 ### Screenshots
 
@@ -144,7 +144,7 @@ across M1-M3 profiles, and any number of saved full-lighting Profiles.
 Talks to the keyboard via `keyledsctl`/`libkeyleds.so` over its real
 HID++ 2.0 protocol, with device paths discovered at runtime instead of
 tied to one physical unit. Runs as a systemd `--user` service for macro
-playback, starts itself at login. Tagged `g910-v1.3`.
+playback, starts itself at login. Tagged `g910-v1.4`.
 
 Want the full story — the HID++ protocol reverse-engineering, every
 real bug hit along the way, the canvas rearchitecture from a plain

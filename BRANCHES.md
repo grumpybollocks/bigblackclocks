@@ -81,6 +81,19 @@ real hardware for the other keyboard.
   it -- the AUR-fetchability blocker that `SKIP` used to represent is
   gone. This tag exists identically in both repos (same commit
   content for every G910 file).
+- `g910-v1.4` -- packaging fix: added `packaging/g910-control/
+  g910-control.install` (a `post_install`/`post_upgrade` hook). Found
+  by comparing the PKGBUILD path against `install-g910.sh`: the script
+  installer enables `ydotool.service` and `g910-control.service` and
+  warns about a udev-rule replug if `keyleds` was just installed --
+  the PKGBUILD did neither, so a fresh `pacman`/AUR-helper install
+  would leave macro playback silently non-functional with no
+  indication why. `.install` hooks can't start `--user` services
+  themselves (no session-bus access during a root/fakeroot
+  transaction), so this prints the same guidance instead -- pacman
+  shows it automatically right after install, more reliable than
+  hoping someone reads a README. Also exists identically in both
+  repos.
 - `g910-gui-v1` -- G910 reaching a single unified canvas-based GUI.
 - `g910-skeleton-v1-buttongrid` -- G910's pre-canvas button-grid UI,
   permanent record before the canvas rearchitecture.
