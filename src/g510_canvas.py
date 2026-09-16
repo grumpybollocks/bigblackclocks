@@ -35,13 +35,20 @@ apply here at all).
 """
 import sys
 from dataclasses import dataclass
-from PyQt5.QtCore import Qt, QRectF, QPointF, pyqtSignal
+from PyQt5.QtCore import Qt, QRectF, QPointF, QSizeF, pyqtSignal
 from PyQt5.QtGui import QPainter, QColor, QPainterPath, QFont, QPen
 from PyQt5.QtWidgets import QWidget, QApplication
 
 CELL_PX = 32
 GUTTER_PX = 4
-PADDING_PX = 10
+# 10 -> 16: was the only real lever for the LCD panel's own top gap
+# ("add a bit more space on top and bottom so it's symmetrical") --
+# the LCD is the topmost cell on the board, so its distance to the
+# canvas edge is structurally always exactly PADDING_PX, whatever its
+# own row value is. This is the canvas's outer margin on all four
+# sides, not LCD-specific, but a uniform +6px is itself inherently
+# symmetrical and a reasonable amount of extra breathing room overall.
+PADDING_PX = 16
 
 
 @dataclass
@@ -80,12 +87,43 @@ MKEY_CELLS = [
 ]
 MKEY_NAMES = {"_M1", "_M2", "_M3", "_MR"}
 
-# --- LCD: decorative only, top-center above the main board -- this is
-# NOT the Custom Screens tab, just a visual placeholder so the canvas
-# looks like the real keyboard. No click handler, no connection to the
-# LCD daemon/state at all.
+# --- LCD: top-center above the WHOLE board. Real, visible mistake in
+# the previous pass: centered against MAIN_CELLS alone (col range
+# 0..15, center 7.5) instead of the true full render including G-keys
+# and the nav/numpad cluster (col range -3.3..23.5, center 10.1) --
+# looked centered against the F-row/alphanumeric block in isolation
+# but visibly left-shifted against the actual whole-keyboard image, a
+# real screenshot caught it directly. col computed as true_center -
+# width/2 = 10.1 - 5.0 = 5.1.
+#
+# On its own row (-2.95, above the M-key row at -1.3 rather than
+# sharing it) so it has real vertical room to grow -- the first
+# "bigger" attempt (height=1.2) was still constrained by the M-key
+# row's slot and came out *smaller* than the real LCD's native 160x43
+# once scaled into that box. This size renders at ~2.2x native scale.
+#
+# height=2.77 (not a round number, deliberately) -- at width=10 the
+# cell's own pixel aspect ratio was 356/93.2=3.82, slightly wider than
+# the real LCD's 160/43=3.72, so KeepAspectRatio letterboxed a few
+# pixels on the sides even though the content filled the full height
+# ("make it a few more pixels tall so it fills the whole space" --
+# taller, not wider, was the right fix specifically because height
+# was already the constraining/fully-filled dimension). Solved
+# directly for the height that makes the cell's own ratio match
+# 160/43 exactly at this width: (356 / (160/43) + 4) / 36 = 2.7688,
+# rounded to 2.77 -- not eyeballed.
+#
+# row: the top gap to the canvas edge is always exactly PADDING_PX
+# regardless of this cell's own row (see PADDING_PX's comment above),
+# so this row value only ever controls the BOTTOM gap (distance to the
+# main board below). Was -3.10 (measured top=16.00px, bottom=15.88px,
+# a genuinely symmetrical pair) -- moved further up to -3.60 on direct
+# request for visibly more separation from the keyboard specifically,
+# no longer aiming for top==bottom equality this time. Adds ~18px more
+# bottom gap (0.5 row units * 36px/unit); top gap is unaffected by
+# construction, still exactly PADDING_PX.
 LCD_CELLS = [
-    Cell("_LCD", "LCD", -1.3, 5, width=3.2, height=0.85, kind="lcd"),
+    Cell("_LCD", "LCD", -3.60, 5.1, width=10.0, height=2.77, kind="lcd"),
 ]
 
 # --- Main board, nav cluster, numpad: ported verbatim from the G910
@@ -164,6 +202,7 @@ KEY_BORDER_COLOR = QColor(10, 10, 12)
 GKEY_COLOR = QColor(58, 90, 130)            # distinct accent -- signals "clickable"
 GKEY_BORDER_COLOR = QColor(80, 130, 190)
 LCD_COLOR = QColor(70, 90, 60)               # muted screen-like tone -- visually distinct as "not a key"
+LCD_BORDER_COLOR = QColor(100, 104, 110)     # cool steel-gray bezel, distinct from every key's near-black border
 MKEY_UNSET_COLOR = QColor(50, 50, 55)
 ACTIVE_MKEY_COLOR = QColor(58, 108, 196)     # matches G910's active-profile accent
 MR_ACTIVE_COLOR = QColor(196, 70, 58)
@@ -186,8 +225,18 @@ class G510Canvas(QWidget):
         self._active_mkey = "M1"
         self._mr_active = False
         self._assigned = set()  # G-key names with a macro in the current profile
+        self._lcd_pixmap = None  # live mirror of the real LCD, set by set_lcd_pixmap()
         self.setMouseTracking(True)  # needed to get hover moves without a button held
         self._compute_size()
+
+    def set_lcd_pixmap(self, pixmap):
+        """A live-rendered thumbnail of whatever's actually on the
+        physical LCD right now (see KeyboardTab's refresh_lcd_mirror()
+        in g510_app.py, which decides WHICH screen to render and calls
+        this on a timer). None falls back to the plain placeholder
+        fill+label, e.g. before the first render completes."""
+        self._lcd_pixmap = pixmap
+        self.update()
 
     def set_board_color(self, qcolor):
         self._board_color = qcolor
@@ -270,15 +319,52 @@ class G510Canvas(QWidget):
             if cell.kind == "gkey" and cell.key_name in self._assigned:
                 border, pen_width = ASSIGNED_BORDER_COLOR, 2
             elif cell.kind == "gkey":
-                border, pen_width = GKEY_BORDER_COLOR, 1
+                # 2px, same weight as the LCD's own bezel ("add some
+                # of the same around the G keys too") -- keeps the
+                # existing blue accent color rather than switching to
+                # the LCD's steel-gray, since that blue is what
+                # actually signals "this is clickable" and isn't
+                # meaningful to change just for a matching outline.
+                border, pen_width = GKEY_BORDER_COLOR, 2
+            elif cell.kind == "lcd":
+                border, pen_width = LCD_BORDER_COLOR, 2
             else:
                 border, pen_width = KEY_BORDER_COLOR, 1
             painter.setPen(QPen(border, pen_width))
             painter.drawPath(path)
 
-            painter.setPen(self._label_color(fill))
-            painter.setFont(mkey_font if cell.kind == "mkey" else font)
-            painter.drawText(rect, Qt.AlignCenter, cell.label)
+            if cell.kind == "lcd" and self._lcd_pixmap is not None:
+                # Real LCD is 160x43 (3.72:1) -- KeepAspectRatio never
+                # upscales past the cell's own bounds, so a mismatched
+                # cell aspect ratio just letterboxes instead of
+                # stretching/distorting the mirrored content.
+                # FastTransformation (nearest-neighbor), not Smooth --
+                # this is a 1-bit monochrome pixel display being
+                # mirrored at ~2.2x; bilinear smoothing blurs its sharp
+                # pixel edges into soft gray gradients (direct report:
+                # "looks blurry now"), where nearest-neighbor keeps it
+                # crisp and blocky, honestly representing what the real
+                # hardware actually looks like instead of prettifying it.
+                # A small inset so the steel-gray border reads as a
+                # real bezel framing the screen, not just an outline
+                # sitting flush against the content's own edge pixels.
+                bezel = 3
+                inner_size = (rect.size() - QSizeF(bezel * 2, bezel * 2)).toSize()
+                scaled = self._lcd_pixmap.scaled(
+                    inner_size, Qt.KeepAspectRatio, Qt.FastTransformation
+                )
+                px = rect.x() + (rect.width() - scaled.width()) / 2
+                py = rect.y() + (rect.height() - scaled.height()) / 2
+                painter.drawPixmap(int(px), int(py), scaled)
+                # Redrawn on top -- the pixmap above would otherwise
+                # sit over the outer edge of the border stroke just
+                # painted, dulling it right where it matters most.
+                painter.setPen(QPen(border, pen_width))
+                painter.drawPath(path)
+            else:
+                painter.setPen(self._label_color(fill))
+                painter.setFont(mkey_font if cell.kind == "mkey" else font)
+                painter.drawText(rect, Qt.AlignCenter, cell.label)
 
     def _is_clickable(self, cell):
         return cell is not None and (cell.kind == "gkey" or cell.key_name in ("_M1", "_M2", "_M3"))

@@ -222,9 +222,13 @@ overloading the `sensor=` field with a special "this isn't really a
 sensor" value.
 
 **Conversion flow**: "Import Image" button → `QFileDialog` to pick a
-PNG (or anything Pillow opens) → run the EXISTING
-`png-to-lcd.py <input> <output.bin> <max_width>` as a subprocess
-(already works, already tested, no changes needed to that file) →
+PNG (or anything Pillow opens) → run
+`png-to-lcd.py <input> <output.bin> <max_width> <max_height>` as a
+subprocess (updated 2026-09-14 post-launch audit: the original
+width-only version let a tall/narrow source image come out taller
+than the 43px screen, which a later C-side hardening pass would then
+silently reject at load -- now both dimensions are constrained,
+never upscaling, so nothing gets dropped) →
 save the `.bin` into `custom_screen_images/` (already gitignored,
 correctly — converted bitmaps are generated artifacts, not source) →
 append an `IMAGE` line to `custom_screens.txt` for the currently

@@ -52,13 +52,17 @@ systemd service correctly contains this machine's real path (not a
 placeholder, not a stale one), the daemon is active, and both desktop
 files were generated identically and correctly.
 
-**G510s**: audited, real gaps found, not yet fixed (tracked as the
-next piece of this work, done on the machine with that hardware):
-- `install.sh`'s desktop-shortcut step only `chmod +x`'s files that
-  must already exist by hand — unlike G910's installer, it never
-  generates them. A genuinely fresh clone gets zero desktop icons.
-- `scripts/start.sh` calls `zenity`, which `install.sh` never installs.
-- Same "also write to `~/.local/share/applications`" gap as G910 had.
+**G510s**: done and verified this pass, on the machine with that
+hardware — `install.sh` now generates all 5 desktop launchers fresh
+from the resolved `$DIR`, ported from G910's already-working pattern.
+Tested by running just the shortcut-generation logic in isolation
+(not the full installer, which would trigger unrelated sudo/pacman/
+udev/systemd changes), diffing the regenerated files against the real
+working originals — only difference was added `Exec=` path quoting (a
+real robustness improvement), confirmed the app still launches
+cleanly via the quoted command, confirmed `dolphin`/`konsole`/`gio`
+are all present on this system. `zenity` added to the dependency
+list. Shortcuts now also land in `~/.local/share/applications`.
 
 ## Researched against a real reference, not guessed
 

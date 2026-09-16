@@ -27,3 +27,6 @@ g910_macros.json
 # reason to keep tracking the data itself in the meantime.
 custom_screens.txt
 macros.json
+
+# Claude Code's own worktree bookkeeping -- not project content
+.claude/
