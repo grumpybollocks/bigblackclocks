@@ -704,8 +704,15 @@ static const sensor_def_t SENSORS[] = {
     {"UPTIME",           "UPTM", 0, 0},
     {"NET_DOWN",         "DOWN", 0, 0},
     {"NET_UP",           "UPLD", 0, 0},
-    {"TIME",             "TIME", 0, 0},
-    {"DATE",             "DATE", 0, 0},
+    /* Direct request: "when selected, i dont want them to say time:
+       xx:xx or date : xxxx / drop the lables" -- an empty label is
+       safe here without any new code path: label_text_width("") is 0
+       (g15r_testG15FontWidth loops zero characters), draw_label("")
+       renders nothing, and value_x = el->x + 0 + 4 just leaves a
+       small natural margin instead of "TIME "/"DATE " prefixing the
+       actual value. */
+    {"TIME",             "",     0, 0},
+    {"DATE",             "",     0, 0},
     {"MB_TEMP1",         "MB1",  0, 1},
     {"MB_TEMP2",         "MB2",  0, 1},
     {"MB_TEMP3",         "MB3",  0, 1},
