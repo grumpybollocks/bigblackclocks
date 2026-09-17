@@ -11,6 +11,7 @@
 #include FT_FREETYPE_H
 #include <libg15render.h>
 #include "font_sanity.h"
+#include "audio_visualizer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -938,6 +939,19 @@ typedef struct {
     int font_size; /* G15_TEXT_SMALL(0)/MED(1)/LARGE(2)/HUGE(3) */
 } text_t;
 
+/* Real-time audio bar visualizer -- direct request: "add ... a little
+   visualizer" alongside media info, later refined with a reference
+   image ("this is how the visualizer needs to look like") showing a
+   segmented, blocky multi-bar equalizer. Capped at 1 per screen (not
+   MAX_ELEMENTS-style multiple) because there is exactly ONE persistent
+   audio-capture stream shared process-wide (see audio_visualizer.h) --
+   a second visualizer element would just duplicate the same bar data,
+   not show anything independently meaningful. */
+#define MAX_VISUALIZERS 1
+typedef struct {
+    int x, y, width, height;
+} visualizer_t;
+
 typedef struct {
     element_t elements[MAX_ELEMENTS];
     int count;
@@ -945,6 +959,8 @@ typedef struct {
     int image_count;
     text_t texts[MAX_TEXTS];
     int text_count;
+    visualizer_t visualizers[MAX_VISUALIZERS];
+    int visualizer_count;
 } custom_screen_t;
 
 static custom_screen_t custom_screens[MAX_CUSTOM_SCREENS];
@@ -970,6 +986,7 @@ static void load_custom_screens(void) {
         custom_screens[i].count = 0;
         custom_screens[i].image_count = 0;
         custom_screens[i].text_count = 0;
+        custom_screens[i].visualizer_count = 0;
     }
     FILE *f = fopen(custom_screens_path(), "r");
     if (!f) return;
@@ -1074,6 +1091,26 @@ static void load_custom_screens(void) {
                 tok = strtok(NULL, " ");
             }
             if (tx->content[0]) cs->text_count++;
+        } else if (strncmp(line, "VISUALIZER ", 11) == 0 && current >= 0) {
+            custom_screen_t *cs = &custom_screens[current];
+            if (cs->visualizer_count >= MAX_VISUALIZERS) continue;
+            visualizer_t *vz = &cs->visualizers[cs->visualizer_count];
+            vz->x = 0; vz->y = 0; vz->width = 0; vz->height = 0;
+            char rest[256];
+            strncpy(rest, line + 11, sizeof(rest) - 1);
+            rest[sizeof(rest) - 1] = 0;
+            char *tok = strtok(rest, " ");
+            while (tok) {
+                char key[32], val[64];
+                if (sscanf(tok, "%31[^=]=%63s", key, val) == 2) {
+                    if (strcmp(key, "x") == 0) vz->x = atoi(val);
+                    else if (strcmp(key, "y") == 0) vz->y = atoi(val);
+                    else if (strcmp(key, "width") == 0) vz->width = atoi(val);
+                    else if (strcmp(key, "height") == 0) vz->height = atoi(val);
+                }
+                tok = strtok(NULL, " ");
+            }
+            if (vz->width > 0 && vz->height > 0) cs->visualizer_count++;
         }
     }
     fclose(f);
@@ -1189,6 +1226,43 @@ static void draw_text_element(g15canvas *c, text_t *tx) {
     g15r_renderString(c, (unsigned char*)tx->content, 0, tx->font_size, tx->x, tx->y);
 }
 
+/* Segmented, blocky multi-bar equalizer -- direct visual reference
+   given by the user (colored gradient bars with distinct LED-style
+   blocks). This LCD is 1-bit monochrome (no color hardware exists on
+   this device -- a hard, unavoidable constraint, explicitly flagged
+   before building this), so the gradient becomes plain black blocks;
+   the blocky segmented SHAPE is fully preserved and was visually
+   verified (rendered standalone with known fake bar data, looked
+   correct) before wiring in real audio. Bar levels come from
+   g_viz_bars[] (audio_visualizer.h), updated once per draw cycle from
+   a persistent parec capture of the PipeWire monitor source -- see
+   that file for why this is player-agnostic (works with Brave,
+   Spotify, anything) by construction. */
+static void draw_visualizer_element(g15canvas *c, visualizer_t *vz) {
+    int num_bars = VIZ_NUM_BARS;
+    int seg_h = 3, seg_gap = 1, bar_gap = 1;
+    int bar_w = (vz->width - (num_bars - 1) * bar_gap) / num_bars;
+    if (bar_w < 1) bar_w = 1;
+    int num_segments = vz->height / (seg_h + seg_gap);
+    if (num_segments < 1) num_segments = 1;
+    int y2 = vz->y + vz->height - 1;
+
+    for (int b = 0; b < num_bars; b++) {
+        double level = g_viz_bars[b] * VIZ_SCALE; /* VIZ_SCALE calibrated against real playing audio, see audio_visualizer.h */
+        if (level > 1.0) level = 1.0;
+        int lit = (int)(level * num_segments + 0.5);
+        if (lit > num_segments) lit = num_segments;
+        int bx1 = vz->x + b * (bar_w + bar_gap);
+        int bx2 = bx1 + bar_w - 1;
+        for (int s = 0; s < lit; s++) {
+            int sy2 = y2 - s * (seg_h + seg_gap);
+            int sy1 = sy2 - seg_h + 1;
+            if (sy1 < vz->y) break;
+            g15r_pixelBox(c, bx1, sy1, bx2, sy2, G15_COLOR_BLACK, 1, 1);
+        }
+    }
+}
+
 static void draw_custom_screen(g15canvas *c, int screen_num) {
     g_element_bounds_count = 0;
     load_custom_screens();
@@ -1200,12 +1274,13 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
        honest empty-state indicator, so an unconfigured screen now just
        draws nothing -- matches what the real LCD should show for a
        screen with nothing on it. */
-    if (cs->count == 0 && cs->image_count == 0 && cs->text_count == 0) {
+    if (cs->count == 0 && cs->image_count == 0 && cs->text_count == 0 && cs->visualizer_count == 0) {
         return;
     }
     for (int i = 0; i < cs->count; i++) draw_element(c, &cs->elements[i]);
     for (int i = 0; i < cs->image_count; i++) draw_image_element(c, &cs->images[i]);
     for (int i = 0; i < cs->text_count; i++) draw_text_element(c, &cs->texts[i]);
+    for (int i = 0; i < cs->visualizer_count; i++) draw_visualizer_element(c, &cs->visualizers[i]);
 }
 
 int main(int argc, char **argv) {
@@ -1257,6 +1332,7 @@ int main(int argc, char **argv) {
         g15r_initCanvas(&canvas);
         update_net_speed();
         update_media_info();
+        viz_set_preview_placeholder();
         if (screen == 1) draw_clock_screen(&canvas);
         else if (screen >= 2 && screen <= 5) {
             draw_custom_screen(&canvas, screen);
@@ -1271,6 +1347,7 @@ int main(int argc, char **argv) {
         g15r_initCanvas(&canvas);
         update_net_speed();
         update_media_info();
+        update_visualizer();
 
         int screen = read_screen();
         if (screen == 1) {

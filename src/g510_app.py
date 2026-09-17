@@ -861,6 +861,9 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
 MAX_TEXTS_PER_SCREEN = 4  # matches MAX_TEXTS in g510_lcd_stats.c
+MAX_VISUALIZERS_PER_SCREEN = 1  # matches MAX_VISUALIZERS in g510_lcd_stats.c -- only one persistent audio-capture stream exists process-wide, a second visualizer element would just duplicate the same bar data
+DEFAULT_VISUALIZER_WIDTH = 70
+DEFAULT_VISUALIZER_HEIGHT = 37
 TEXT_CHAR_PX = 6  # rough estimate for G15_TEXT_SMALL's per-character width -- no real font-metric access from Python for freeform text (same reason sensor elements originally needed the .meta sidecar), but text elements deliberately skip that mechanism (see on_add_text's docstring) so this stays an approximation, not pixel-perfect
 
 # Direct request: "id like to be able to resize elements". libg15render
@@ -966,6 +969,19 @@ def load_custom_screens():
                     tx[k] = v.replace("_", " ")
             if tx["content"]:
                 config[current].append(tx)
+        elif line.startswith("VISUALIZER ") and current:
+            vz = {"kind": "visualizer", "x": 0, "y": 0, "width": 0, "height": 0}
+            for tok in line[len("VISUALIZER "):].split():
+                if "=" not in tok:
+                    continue
+                k, v = tok.split("=", 1)
+                if k in ("x", "y", "width", "height"):
+                    try:
+                        vz[k] = int(v)
+                    except ValueError:
+                        pass
+            if vz["width"] > 0 and vz["height"] > 0:
+                config[current].append(vz)
     return config
 
 
@@ -989,6 +1005,8 @@ def save_custom_screens(config):
                 # load_custom_screens()), not silent data corruption.
                 content = el["content"].replace(" ", "_") or "_"
                 lines.append(f"TEXT content={content} x={el['x']} y={el['y']} font={el.get('font_size', 0)}")
+            elif el.get("kind") == "visualizer":
+                lines.append(f"VISUALIZER x={el['x']} y={el['y']} width={el['width']} height={el['height']}")
             else:
                 width = el.get("width", 40)
                 lines.append(
@@ -1152,11 +1170,11 @@ class ScreenPreviewCanvas(QWidget):
 
     def _element_rect(self, index):
         el = self._elements[index]
-        if el.get("kind") == "image":
-            # Images know their own exact size (set once at import time
-            # by png-to-lcd.py and never changes) -- no need for the
-            # C-reported .meta bounds that sensor elements need, since
-            # there's no font-metric unknown here.
+        if el.get("kind") in ("image", "visualizer"):
+            # Both kinds know their own exact size directly (image: set
+            # at import time by png-to-lcd.py; visualizer: just a plain
+            # x/y/width/height box, no font-metric unknown either) --
+            # no need for the C-reported .meta bounds sensor elements need.
             return QRect(el["x"] * PREVIEW_SCALE, el["y"] * PREVIEW_SCALE,
                          el["width"] * PREVIEW_SCALE, el["height"] * PREVIEW_SCALE)
         if el.get("kind") == "text":
@@ -1210,10 +1228,10 @@ class ScreenPreviewCanvas(QWidget):
         el = self._elements[index]
         b = self._bounds.get(self._sensor_rank(index))
         r = RESIZE_HANDLE_PX * PREVIEW_SCALE
-        if el.get("kind") == "image":
-            # Bottom-right corner of the image's own known box -- no
-            # font-metric guess needed here, images know their exact
-            # size directly (same reasoning as _element_rect's image case).
+        if el.get("kind") in ("image", "visualizer"):
+            # Bottom-right corner of the element's own known box -- no
+            # font-metric guess needed here (same reasoning as
+            # _element_rect's image/visualizer case above).
             hx = (el["x"] + el["width"]) * PREVIEW_SCALE
             hy = (el["y"] + el["height"]) * PREVIEW_SCALE
             return QRect(hx - r, hy - r, r * 2, r * 2)
@@ -1239,6 +1257,10 @@ class ScreenPreviewCanvas(QWidget):
 
     def _resizable(self, el):
         if el.get("style") == "bar":
+            return True
+        if el.get("kind") == "visualizer":
+            # Always resizable -- just a plain box, no re-conversion
+            # from a source file needed the way images require.
             return True
         # Only images imported since drag-resize was added carry a
         # "src" (a kept copy of the real source picture) -- an older
@@ -1293,6 +1315,11 @@ class ScreenPreviewCanvas(QWidget):
             if el.get("kind") == "image":
                 self._resize_kind = "image"
                 self._image_resize_preview_wh = (el["width"], el["height"])
+            elif el.get("kind") == "visualizer":
+                # Unlike an image, no subprocess/re-conversion is ever
+                # needed to change a visualizer's box size -- resize is
+                # a cheap, direct, synchronous width/height update.
+                self._resize_kind = "visualizer"
             else:
                 self._resize_kind = "bar"
                 self._resize_start_x = event.pos().x()
@@ -1321,6 +1348,19 @@ class ScreenPreviewCanvas(QWidget):
             if self._image_resize_preview_wh != (target_w, target_h):
                 self._image_resize_preview_wh = (target_w, target_h)
                 self.image_resize_requested.emit(self._resize_index, target_w, target_h)
+            self.update()
+            return
+
+        if self._resize_index is not None and self._resize_kind == "visualizer":
+            self.setCursor(Qt.SizeFDiagCursor)
+            el = self._elements[self._resize_index]
+            target_w = round(event.pos().x() / PREVIEW_SCALE) - el["x"]
+            target_h = round(event.pos().y() / PREVIEW_SCALE) - el["y"]
+            target_w = max(MIN_IMAGE_SIZE, min(LCD_WIDTH - el["x"], target_w))
+            target_h = max(MIN_IMAGE_SIZE, min(LCD_HEIGHT - el["y"], target_h))
+            if el["width"] != target_w or el["height"] != target_h:
+                el["width"], el["height"] = target_w, target_h
+                self.element_resized.emit(self._resize_index, target_w)
             self.update()
             return
 
@@ -1581,6 +1621,15 @@ class CustomScreensTab(QWidget):
         self.add_text_btn.clicked.connect(self.on_add_text)
         panel_layout.addWidget(self.add_text_btn)
 
+        self.add_visualizer_btn = QPushButton("Add Visualizer")
+        self.add_visualizer_btn.setObjectName("PanelButton")
+        self.add_visualizer_btn.setToolTip(
+            "A live audio bar visualizer -- reacts to whatever's actually "
+            "playing on this PC (any player: Brave, Spotify, VLC, etc)."
+        )
+        self.add_visualizer_btn.clicked.connect(self.on_add_visualizer)
+        panel_layout.addWidget(self.add_visualizer_btn)
+
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setObjectName("Separator")
@@ -1657,6 +1706,12 @@ class CustomScreensTab(QWidget):
         self.import_image_btn.setToolTip(l1_reason)
         self.add_text_btn.setEnabled(editable)
         self.add_text_btn.setToolTip(l1_reason)
+        self.add_visualizer_btn.setEnabled(editable)
+        self.add_visualizer_btn.setToolTip(
+            l1_reason if not editable else
+            "A live audio bar visualizer -- reacts to whatever's actually "
+            "playing on this PC (any player: Brave, Spotify, VLC, etc)."
+        )
         self.refresh_elements_list()
         self.refresh_preview()
 
@@ -1872,6 +1927,34 @@ class CustomScreensTab(QWidget):
         self.refresh_elements_list()
         self.refresh_preview()
 
+    def on_add_visualizer(self):
+        """Real-time audio bar visualizer -- direct request: "add ...
+        a little visualizer" alongside media info, refined with a
+        reference image to a segmented, blocky multi-bar look. Capped
+        at 1 per screen (see MAX_VISUALIZERS_PER_SCREEN) since there's
+        exactly one persistent audio-capture stream process-wide."""
+        if self.current_screen == "L1":
+            return  # button is disabled for this case, this is just a safety guard
+        elements = self.config[self.current_screen]
+        viz_count = sum(1 for el in elements if el.get("kind") == "visualizer")
+        if viz_count >= MAX_VISUALIZERS_PER_SCREEN:
+            QMessageBox.warning(
+                self, "Screen full",
+                f"Each screen supports up to {MAX_VISUALIZERS_PER_SCREEN} visualizer -- "
+                "only one audio stream is captured at a time, a second would just repeat it."
+            )
+            return
+
+        default_x = min(6, max(0, LCD_WIDTH - DEFAULT_VISUALIZER_WIDTH))
+        default_y = min(3, max(0, LCD_HEIGHT - DEFAULT_VISUALIZER_HEIGHT))
+        elements.append({
+            "kind": "visualizer", "x": default_x, "y": default_y,
+            "width": DEFAULT_VISUALIZER_WIDTH, "height": DEFAULT_VISUALIZER_HEIGHT,
+        })
+        save_custom_screens(self.config)
+        self.refresh_elements_list()
+        self.refresh_preview()
+
     def on_remove_element(self, index):
         del self.config[self.current_screen][index]
         save_custom_screens(self.config)
@@ -1884,7 +1967,7 @@ class CustomScreensTab(QWidget):
         # back so its far edge stays on the visible 160x43 screen,
         # same rule the drag-clamp fix now enforces for new drags.
         for el in self.config[self.current_screen]:
-            if el.get("kind") == "image":
+            if el.get("kind") in ("image", "visualizer"):
                 w, h = el.get("width", 0), el.get("height", 0)
             elif el.get("kind") == "text":
                 _, h_ratio = FONT_SIZE_SCALE.get(el.get("font_size", 0), (1.0, 1.0))
@@ -2026,7 +2109,7 @@ class CustomScreensTab(QWidget):
         # any element's content likely extends past the visible screen.
         overflowing = False
         for el in elements:
-            if el.get("kind") == "image":
+            if el.get("kind") in ("image", "visualizer"):
                 w, h = el.get("width", 0), el.get("height", 0)
             elif el.get("kind") == "text":
                 _, h_ratio = FONT_SIZE_SCALE.get(el.get("font_size", 0), (1.0, 1.0))
@@ -2057,6 +2140,9 @@ class CustomScreensTab(QWidget):
                 shown = el["content"] if len(el["content"]) <= 20 else el["content"][:17] + "..."
                 text = QLabel(f'Text: "{shown}"')
                 text.setToolTip(f"x={el['x']} y={el['y']}")
+            elif el.get("kind") == "visualizer":
+                text = QLabel("Visualizer (live audio)")
+                text.setToolTip(f"x={el['x']} y={el['y']} {el['width']}x{el['height']}px")
             else:
                 label = SENSOR_LABELS.get(el["sensor"], el["sensor"])
                 text = QLabel(f"{label} – {el['style']}")
