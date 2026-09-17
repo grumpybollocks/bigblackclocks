@@ -88,15 +88,12 @@ personal:
 - The app can show free space on a second drive over its LCD like any
   other sensor, on request — fully optional, shows "N/A" gracefully on
   any setup that doesn't have one.
-- This app was originally built and developed alongside a sibling app
-  for the Logitech G910 (see "Not the repo you're after?" above) —
-  two separate Claude Code sessions, one per keyboard, each on its own
-  machine, coordinating over actual messages to each other, catching
-  each other's mistakes and occasionally getting confused by each
-  other's shorthand ("Plan A/B" turned out to be a mishearing of
-  "Phase A/B"). That history predates the split and lives on in this
-  repo's own commit log even though the G910 app's files themselves
-  have moved on.
+- Built by grumpybollocks and Claude, working through it together —
+  including a sibling app for the Logitech G910 (see "Not the repo
+  you're after?" above) that started out alongside this one before the
+  split. That history predates the split and lives on in this repo's
+  own commit log even though the G910 app's files themselves have
+  moved on.
 - "wtf are the blue squares for?" is a genuine, verbatim piece of user
   feedback that shipped an actual UI fix (resize handles now only show
   up when you're hovering near them, not all at once) — which is as
