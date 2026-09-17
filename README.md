@@ -11,23 +11,26 @@ software is Windows-only and everything else out there is old,
 abandoned, or half-broken, so this talks to the keyboard's real
 USB/HID traffic directly instead.
 
-## Quickstart
+## Download & Install
 
 ```
+git clone https://github.com/grumpybollocks/bigblackclocks.git
+cd bigblackclocks
 ./install.sh
 ```
 
-Sorts out every dependency, builds the LCD driver, wires up the
-systemd services, and adds desktop shortcuts. The one thing it can't
-do for you: your own copy of the Eurostile Bold font (a licensing
-thing — see [`G510_README.md`](G510_README.md)'s FONTS section).
+`install.sh` sorts out every dependency (reporting exactly what's
+already installed vs. what it's about to add — never a silent
+black-box `pacman` run), builds the LCD driver, converts the label
+font, wires up the systemd services, and adds desktop shortcuts. Safe
+to re-run any time.
 
 **What you get:**
 - Live CPU / RAM / VRAM / TEMP stats on the built-in LCD
 - Full RGB backlight colour control
 - G-key macros across M1 / M2 / M3 profiles
 - Custom Screens dashboard builder — drag sensors, images, and text
-  onto L2-L5 (on `g510s-dev`, not merged to `main` yet)
+  onto L2-L5, plus a live analog clock on L1
 - Runs as your normal user, starts at login, shrugs off reboots —
   no root faffing about
 
@@ -42,16 +45,15 @@ mappings wrong. Runs quietly as three systemd `--user` services.
 
 ## Status
 
-- **Private**, as intended — a 2026-09-17 audit briefly found it set to
-  public on GitHub; fixed the same night.
+- **Public** on GitHub.
 - **`main`**: tagged `v1.0` (LCD stats, backlight, G-key macros) —
-  stable, confirmed.
-- **`g510s-dev`**: active work, not merged yet — Custom Screens, a
-  live analog clock, the Backlight+G-Keys canvas rearchitecture, and
-  an Arch package. Nothing merges to `main` until it's physically
-  confirmed on the real keyboard — standing rule, not a delay.
-- Not on the AUR yet — the package points at this private repo, which
-  the AUR can't fetch from.
+  stable, confirmed. Analog clock, Custom Screens polish, and several
+  real bug fixes have since merged on top, physically confirmed
+  working on the real keyboard.
+- **`g510s-dev`**: active work, merges to `main` only once it's
+  physically confirmed on the real keyboard — standing rule, not a
+  delay.
+- Not on the AUR — not currently being pursued.
 
 ## Not the repo you're after?
 

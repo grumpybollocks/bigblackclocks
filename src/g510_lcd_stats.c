@@ -10,6 +10,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <libg15render.h>
+#include "font_sanity.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -412,6 +413,22 @@ static const char *font_path(void) {
     FILE *f = fopen(path, "rb");
     if (f) { fclose(f); return path; }
     return FONT_PATH_FALLBACK;
+}
+
+/* Second-tier fallback: a genuinely clean, SIL-OFL-licensed font
+   (fonts/source-ttf/FALLBACK.ttf, converted to lcd-label-8-fallback.fnt
+   by install.sh/scripts/rebuild.sh) used only if the primary font at
+   font_path() is missing, unparseable, or fails label_font_is_sane()
+   (see font_sanity.h). Same data_dir()-then-PROJECT_DIR resolution
+   order as font_path() itself. */
+#define FALLBACK_FONT_PATH_FALLBACK PROJECT_DIR "/fonts/lcd-label-8-fallback.fnt"
+
+static const char *fallback_font_path(void) {
+    static char path[256];
+    snprintf(path, sizeof(path), "%s/fonts/lcd-label-8-fallback.fnt", data_dir());
+    FILE *f = fopen(path, "rb");
+    if (f) { fclose(f); return path; }
+    return FALLBACK_FONT_PATH_FALLBACK;
 }
 
 static const char *custom_screens_path(void) {
@@ -1125,15 +1142,40 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
 }
 
 int main(int argc, char **argv) {
-    /* A missing/unconvertible custom font is not fatal -- draw_label()/
-       label_text_width()/label_text_height() all fall back to
-       libg15render's built-in stock font whenever label_font is NULL,
-       so the app stays fully usable (just with plainer labels) on a
-       fresh install with no font configured yet, instead of refusing
-       to start at all. */
+    /* Three-tier font fallback chain, none of it fatal:
+       1. font_path() -- the primary bundled/converted label font.
+       2. If that's missing, unparseable, OR loads but fails
+          label_font_is_sane() (see font_sanity.h -- guards against a
+          font that "loads" but is corrupted, the exact failure class
+          documented in this file's own history: a bad conversion once
+          rendered 'S' as something closer to '6'), fall back to
+          fallback_font_path() -- a second, genuinely clean SIL-OFL
+          font (FALLBACK.ttf), same sanity check applied to it too.
+       3. If even that's unavailable, draw_label()/label_text_width()/
+          label_text_height() all fall back to libg15render's own
+          built-in stock font whenever label_font is NULL, so the app
+          stays fully usable (just with plainer labels) rather than
+          refusing to start at all. */
     label_font = g15r_loadG15Font((char*)font_path());
+    if (label_font && !label_font_is_sane(label_font)) {
+        fprintf(stderr, "g510-lcd-stats: primary label font at %s failed a "
+                         "glyph sanity check (looks corrupted) -- trying the "
+                         "bundled fallback font instead\n", font_path());
+        g15r_deleteG15Font(label_font);
+        label_font = NULL;
+    }
     if (!label_font) {
-        fprintf(stderr, "g510-lcd-stats: no custom label font configured (see "
+        label_font = g15r_loadG15Font((char*)fallback_font_path());
+        if (label_font && !label_font_is_sane(label_font)) {
+            fprintf(stderr, "g510-lcd-stats: fallback label font at %s also "
+                             "failed a glyph sanity check -- using the stock "
+                             "font for labels instead\n", fallback_font_path());
+            g15r_deleteG15Font(label_font);
+            label_font = NULL;
+        }
+    }
+    if (!label_font) {
+        fprintf(stderr, "g510-lcd-stats: no usable custom label font found (see "
                          "README's FONTS section) -- using the stock font for "
                          "labels instead\n");
     }

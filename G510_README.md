@@ -60,7 +60,8 @@ Turns the Logitech G510s keyboard's built-in LCD into a live CPU/RAM/VRAM/TEMP d
 | `g510-lcd-buttons.service` | systemd --user unit for the above |
 | `99-g510-lcd.rules` | udev rules (see PERSISTENCE below) |
 | `fonts/lcd-label-8.fnt` | the label font, converted, actually used (see FONTS below) |
-| `fonts/source-ttf/Euro_Bold.otf` | the original font `lcd-label-8.fnt` was converted FROM (keep this — you need it to reconvert at a different size/gap; the `.fnt` alone can't be edited, only regenerated from this source) |
+| `fonts/source-ttf/FONT.otf` | the original label font `lcd-label-8.fnt` is converted FROM — committed to the repo. Its embedded metadata references an Adobe Typekit EULA rather than a free license; that's a knowingly accepted risk, not an oversight. install.sh/scripts/rebuild.sh convert it automatically now, no manual step needed. |
+| `fonts/source-ttf/FALLBACK.ttf` | Liberation Sans Bold (SIL Open Font License, genuinely free) — automatically used instead if `FONT.otf` ever fails to load or fails a corruption sanity check. See `font_sanity.h`. |
 | `set-backlight-color.sh` | applies the saved backlight color on boot (auto-rewritten every time you click Apply in the GUI — don't hand-edit and expect it to stick, the GUI owns this file now) |
 | `rebuild.sh` | recompiles both programs, restarts services |
 | `view-logs.sh` | tails both services' logs live |
@@ -147,9 +148,13 @@ python3 -c "import struct; print(struct.unpack('<H', open('FILE.fnt','rb').read(
 
 and adjust `-s` up/down until it matches what you want (our 10px row spacing needs a font around 8-9px tall).
 
-IMPORTANT: thin/regular-weight fonts render GARBLED at this tiny size (confirmed multiple times) — there simply aren't enough pixels for fine strokes. Use Bold or Black weights only. Current setup: labels use Eurostile Bold (`fonts/source-ttf` has the `.otf`, matches the G510s's original stock LCD font style), numbers use the library's own built-in `G15_TEXT_SMALL` font (also tried several converted fonts for numbers — all looked worse than the built-in one, which was purpose-built for this exact resolution).
+IMPORTANT: thin/regular-weight fonts render GARBLED at this tiny size (confirmed multiple times) — there simply aren't enough pixels for fine strokes. Use Bold or Black weights only. Current setup: labels use the bundled `fonts/source-ttf/FONT.otf` (matches the G510s's original stock LCD font style), numbers use the library's own built-in `G15_TEXT_SMALL` font (also tried several converted fonts for numbers — all looked worse than the built-in one, which was purpose-built for this exact resolution).
 
 `.otb`/`.pcf` bitmap fonts (like Terminus) do NOT work with `g15fontconvert` — it silently produces an empty/broken `.fnt` (`font_height` stuck at one value regardless of `-s`, near-zero file size). Only scalable TTF/OTF outline fonts convert correctly.
+
+**Licensing note (recorded decision, not an oversight):** `FONT.otf`'s embedded metadata (checked directly with `strings fonts/source-ttf/FONT.otf`) contains an Adobe Typekit EULA reference (`typekit.com/eulas/...`), not a free-license one — meaning this specific file is very likely not something its author intended to be freely redistributed. It's bundled here anyway, a knowingly accepted risk. As a safety net, not a licensing fix, `fonts/source-ttf/FALLBACK.ttf` (Liberation Sans Bold, genuinely SIL Open Font License, license text at `fonts/source-ttf/FALLBACK.LICENSE.txt`) is also bundled and converted — `g510_lcd_stats` automatically switches to it if `FONT.otf` ever fails to load or fails a glyph sanity check (see `font_sanity.h` and the "Gotcha We Actually Hit" section above about the corrupted-'S'-glyph bug this guards against).
+
+install.sh and scripts/rebuild.sh now convert both fonts automatically (`g15fontconvert`, part of the AUR `libg15render` package) — no manual step needed on a fresh install.
 
 ## Backlight (RGB Keyboard Glow)
 
