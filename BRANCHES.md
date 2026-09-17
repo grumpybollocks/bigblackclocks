@@ -21,14 +21,13 @@ standalone public repo, [grumpybollocks/g910-control](https://github.com/grumpyb
 already has everything from here and more. `main` is now exclusively
 about the G510s.
 
-The old `g910` and `g910-canvas` branches and every `g910-*` tag
-(`g910-v1.0`-`v1.4`, `g910-gui-v1`, `g910-skeleton-v1-buttongrid`) are
-fully superseded by that same verification and are queued for removal
-from this repo too -- not yet done as of this commit, since deleting
-remote branches/tags is a deliberately manual, explicitly-confirmed
-step here rather than something scripted to just happen. A full
-`--mirror` backup of this repo's pre-cleanup state was taken first
-regardless, so none of it is actually unrecoverable either way.
+The old `g910` and `g910-canvas` branches, the short-lived empty
+`g510s` branch, and every `g910-*` tag (`g910-v1.0`-`v1.4`,
+`g910-gui-v1`, `g910-skeleton-v1-buttongrid`) were fully superseded by
+that same verification and have since been deleted from this repo too
+(2026-09-17). A full `--mirror` backup of this repo's pre-cleanup state
+was taken first, so none of it is actually unrecoverable even though
+it's gone from GitHub now.
 
 ## Active branches
 

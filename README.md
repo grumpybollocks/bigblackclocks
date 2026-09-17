@@ -42,28 +42,25 @@ mappings wrong. Runs quietly as three systemd `--user` services.
 
 ## Status
 
-- **Meant to be private, isn't right now.** A 2026-09-17 audit found
-  this repo set to public on GitHub despite every doc/commit here
-  saying otherwise. Fixing that needs a manual, explicit action —
-  don't assume either way until someone's actually checked
-  `gh api repos/grumpybollocks/bigblackclocks -q '{private,visibility}'`.
+- **Private**, as intended — a 2026-09-17 audit briefly found it set to
+  public on GitHub; fixed the same night.
 - **`main`**: tagged `v1.0` (LCD stats, backlight, G-key macros) —
   stable, confirmed.
 - **`g510s-dev`**: active work, not merged yet — Custom Screens, a
   live analog clock, the Backlight+G-Keys canvas rearchitecture, and
   an Arch package. Nothing merges to `main` until it's physically
   confirmed on the real keyboard — standing rule, not a delay.
-- Not on the AUR yet — the package points at this (meant-to-be-private)
-  repo, which the AUR can't fetch from either way.
+- Not on the AUR yet — the package points at this private repo, which
+  the AUR can't fetch from.
 
 ## Not the repo you're after?
 
 This used to also hold a separate app for the Logitech **G910** —
 different keyboard, different codebase. That's fully moved out to
 [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control),
-already ahead of anything that was ever here. A few frozen, superseded
-G910 branches/tags are still queued for a final tidy-up pass in this
-repo (see [`BRANCHES.md`](BRANCHES.md)) but no G910 *file* has lived on
+already ahead of anything that was ever here. Every G910 branch and
+tag has also been removed from this repo (see [`BRANCHES.md`](BRANCHES.md)
+for the full history) — no G910 *file*, branch, or tag has lived on
 `main` since 2026-09-17.
 
 ## Docs
