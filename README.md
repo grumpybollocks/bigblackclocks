@@ -22,12 +22,15 @@ driven properly from scratch: LCD screen, backlight, and G-key macros.
 
 This repo used to also contain a separate app for the Logitech G910
 Orion Spectrum (per-key RGB/macros) — a different keyboard, different
-codebase, developed alongside this one for a while. That app has been
-fully moved out: its source, docs, install script, packaging, and
-entire dev history now live in their own standalone public repo,
-[grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control).
-Nothing G910-related remains here, in any branch or tag, as of
-2026-09-17 — if you're looking for that, it's over there.
+codebase, developed alongside this one for a while. That app's source,
+docs, install script, and packaging have been fully removed from
+`main` as of 2026-09-17; they live in their own standalone public
+repo, [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control),
+already ahead of what was ever here. A couple of frozen, fully
+superseded G910 branches/tags are still queued for a final tidy-up
+pass here — see [`BRANCHES.md`](BRANCHES.md) for exactly what and why
+— but no G910 *file* has been on `main` since that date. If you're
+looking for that app, it's over there.
 
 The Logitech G510s — same family, same era as the G910, same problem:
 nothing on Linux actually drives its hardware properly. Logitech's own

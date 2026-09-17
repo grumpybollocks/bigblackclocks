@@ -14,13 +14,21 @@ solid, what's still a known gap.
 Until 2026-09-17 this repo also held a separate app for the Logitech
 G910 Orion Spectrum (per-key RGB/macros), developed alongside the
 G510s app for a while. That app's source, docs, install script,
-packaging, and full dev history (the `g910` and `g910-canvas`
-branches, and every `g910-*` tag) have been removed from here --
-confirmed byte-identical-or-newer in the app's own standalone public
-repo, [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control),
-before anything was deleted, and a full mirror of this repo's
-pre-cleanup state was taken first so nothing is actually unrecoverable.
-This repo is now exclusively about the G510s.
+packaging, and service unit have been removed from `main` as of
+2026-09-17 -- confirmed content-for-content (every shared file, at
+every matching tag, not just by commit log) that the app's own
+standalone public repo, [grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control),
+already has everything from here and more. `main` is now exclusively
+about the G510s.
+
+The old `g910` and `g910-canvas` branches and every `g910-*` tag
+(`g910-v1.0`-`v1.4`, `g910-gui-v1`, `g910-skeleton-v1-buttongrid`) are
+fully superseded by that same verification and are queued for removal
+from this repo too -- not yet done as of this commit, since deleting
+remote branches/tags is a deliberately manual, explicitly-confirmed
+step here rather than something scripted to just happen. A full
+`--mirror` backup of this repo's pre-cleanup state was taken first
+regardless, so none of it is actually unrecoverable either way.
 
 ## Active branches
 
