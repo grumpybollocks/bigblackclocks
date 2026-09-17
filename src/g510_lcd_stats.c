@@ -260,6 +260,61 @@ static void update_net_speed(void) {
     prev_rx = rx; prev_tx = tx; prev_time = now;
 }
 
+/* Media info (song/artist/elapsed) via playerctl -- deliberately
+   player-agnostic (works with Brave, Spotify, VLC, anything exposing
+   MPRIS over D-Bus, confirmed for real against a real Brave YouTube
+   Music tab: "brave.instanceNNNN" showed up in `playerctl -l` and
+   metadata queries worked). One combined --format call per poll cycle
+   (same once-per-frame pattern as update_net_speed() above) instead of
+   3 separate playerctl invocations -- cheaper, and avoids the fields
+   being read from 3 different, possibly-inconsistent snapshots in time.
+
+   Delimiter is the ASCII Unit Separator (0x1F, "\x1f" in this C string
+   literal -- a real byte, not bash escape syntax), not something
+   printable like "|" -- verified necessary with a REAL title
+   containing a literal "|" character ("Müneccim | YouTube Music"),
+   which would have silently corrupted naive pipe-delimited parsing.
+
+   playerctl's {{ position }}/{{ mpris:length }} format fields are in
+   MICROSECONDS -- confirmed by direct testing, NOT the same unit as
+   the separate `playerctl position` subcommand (which returns
+   seconds) -- an easy, real mistake to make by assuming consistency
+   instead of testing both. */
+static char g_media_title[64] = "";
+static char g_media_artist[48] = "";
+static char g_media_elapsed[32] = ""; /* wide enough for even an absurdly long podcast (e.g. 9999:59/9999:59) -- -Wformat-truncation caught the original 16-byte buffer as theoretically too small, real warning, not ignored */
+
+static void update_media_info(void) {
+    g_media_title[0] = 0;
+    g_media_artist[0] = 0;
+    g_media_elapsed[0] = 0;
+    FILE *p = popen("playerctl metadata --format '{{ title }}\x1f{{ artist }}\x1f{{ position }}\x1f{{ mpris:length }}' 2>/dev/null", "r");
+    if (!p) return;
+    char line[256] = "";
+    if (fgets(line, sizeof(line), p)) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = 0;
+        char *title = line;
+        char *artist = strchr(title, '\x1f');
+        if (artist) { *artist = 0; artist++; }
+        char *pos_str = artist ? strchr(artist, '\x1f') : NULL;
+        if (pos_str) { *pos_str = 0; pos_str++; }
+        char *len_str = pos_str ? strchr(pos_str, '\x1f') : NULL;
+        if (len_str) { *len_str = 0; len_str++; }
+        strncpy(g_media_title, title, sizeof(g_media_title) - 1);
+        if (artist) strncpy(g_media_artist, artist, sizeof(g_media_artist) - 1);
+        if (pos_str && len_str) {
+            long pos_us = atol(pos_str);
+            long len_us = atol(len_str);
+            int pos_s = (int)(pos_us / 1000000);
+            int len_s = (int)(len_us / 1000000);
+            snprintf(g_media_elapsed, sizeof(g_media_elapsed), "%d:%02d/%d:%02d",
+                     pos_s / 60, pos_s % 60, len_s / 60, len_s % 60);
+        }
+    }
+    pclose(p);
+}
+
 static void format_kbps(double kbps, char *out, size_t outlen) {
     if (kbps > 1024.0) snprintf(out, outlen, "%.1fM", kbps / 1024.0);
     else snprintf(out, outlen, "%.0fK", kbps);
@@ -730,6 +785,12 @@ static const sensor_def_t SENSORS[] = {
        actual value. */
     {"TIME",             "",     0, 0},
     {"DATE",             "",     0, 0},
+    /* Empty labels, same reasoning as TIME/DATE above -- the content
+       itself (a song title, an artist name, "1:23/3:45") is already
+       self-descriptive, and every pixel matters on this screen. */
+    {"MEDIA_TITLE",       "",    0, 0},
+    {"MEDIA_ARTIST",      "",    0, 0},
+    {"MEDIA_ELAPSED",     "",    0, 0},
     {"MB_TEMP1",         "MB1",  0, 1},
     {"MB_TEMP2",         "MB2",  0, 1},
     {"MB_TEMP3",         "MB3",  0, 1},
@@ -818,6 +879,12 @@ static void get_sensor_value(const char *key, double *pct_for_bar, char *disp, s
     } else if (strcmp(key, "DATE") == 0) {
         time_t now = time(NULL);
         strftime(disp, displen, "%d %b", localtime(&now));
+    } else if (strcmp(key, "MEDIA_TITLE") == 0) {
+        snprintf(disp, displen, "%s", g_media_title);
+    } else if (strcmp(key, "MEDIA_ARTIST") == 0) {
+        snprintf(disp, displen, "%s", g_media_artist);
+    } else if (strcmp(key, "MEDIA_ELAPSED") == 0) {
+        snprintf(disp, displen, "%s", g_media_elapsed);
     } else if (strncmp(key, "MB_TEMP", 7) == 0) {
         int n = atoi(key + 7);
         char path[128];
@@ -1189,6 +1256,7 @@ int main(int argc, char **argv) {
         g15canvas canvas;
         g15r_initCanvas(&canvas);
         update_net_speed();
+        update_media_info();
         if (screen == 1) draw_clock_screen(&canvas);
         else if (screen >= 2 && screen <= 5) {
             draw_custom_screen(&canvas, screen);
@@ -1202,6 +1270,7 @@ int main(int argc, char **argv) {
         g15canvas canvas;
         g15r_initCanvas(&canvas);
         update_net_speed();
+        update_media_info();
 
         int screen = read_screen();
         if (screen == 1) {
