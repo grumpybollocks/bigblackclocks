@@ -1,9 +1,11 @@
 # G510s Canvas Rearchitecture — Backlight + G-Keys merged into one view
 
 Built 2026-09-14 on the machine where the real G510s hardware lives,
-mirroring the sibling G910 project's canvas rearchitecture
-(`G910_CANVAS_PLAN.md`, branch `g910-canvas`) at the user's explicit
-request: "adapt this one to the variables at hand." Not a shared
+mirroring the sibling G910 project's canvas rearchitecture (its own
+`G910_CANVAS_PLAN.md`, branch `g910-canvas` — both now over in
+[grumpybollocks/g910-control](https://github.com/grumpybollocks/g910-control),
+not in this repo) at the user's explicit request: "adapt this one to
+the variables at hand." Not a shared
 codebase with the G910 app — a parallel, independent implementation,
 because the two keyboards' real capabilities are too different to
 force through one abstraction (see "What's different from G910"

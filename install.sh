@@ -69,8 +69,9 @@ echo "=== 6/6: Desktop shortcuts ==="
 # exist by hand). Written to BOTH ~/Desktop and ~/.local/share/applications:
 # several desktop environments (GNOME notably) don't show desktop icons by
 # default at all, so ~/Desktop alone leaves the app menu with nothing.
-# Pattern matches the G910 sibling app's install-g910.sh, already verified
-# working there.
+# Pattern matches the sibling G910 app's install-g910.sh (now in the
+# separate grumpybollocks/g910-control repo), already verified working
+# there.
 mkdir -p "$HOME/Desktop" "$HOME/.local/share/applications"
 
 write_shortcut() {
