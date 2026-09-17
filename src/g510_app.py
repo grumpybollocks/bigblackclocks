@@ -1611,6 +1611,21 @@ class CustomScreensTab(QWidget):
         add_btn.clicked.connect(self.on_add_element)
         panel_layout.addWidget(add_btn)
 
+        # Direct report: "gui buttons are ambigious and not that well
+        # placed" -- Import Image/Add Text/Add Visualizer were stacked
+        # directly under "Add" with nothing to show they're independent
+        # actions, not related to the sensor/style/size dropdowns above.
+        # A visible separator + label makes the grouping unambiguous.
+        elements_sep = QFrame()
+        elements_sep.setFrameShape(QFrame.HLine)
+        elements_sep.setObjectName("Separator")
+        panel_layout.addSpacing(8)
+        panel_layout.addWidget(elements_sep)
+        panel_layout.addSpacing(4)
+        other_elements_label = QLabel("Other elements:")
+        other_elements_label.setObjectName("Status")
+        panel_layout.addWidget(other_elements_label)
+
         self.import_image_btn = QPushButton("Import Image...")
         self.import_image_btn.setObjectName("PanelButton")
         self.import_image_btn.clicked.connect(self.on_import_image)

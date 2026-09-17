@@ -74,14 +74,21 @@
 #define VIZ_SAMPLE_RATE 44100
 /* Calibrated against real playing audio via a standalone harness
    (called update_visualizer() in a loop, printed g_viz_bars[] every
-   300ms while real music played through this machine's speakers at
-   normal volume) -- NOT guessed. Two rounds: a 440Hz test tone first
-   (peaked ~0.11), then real music (typical ~0.02-0.04, peaks
-   ~0.07-0.09, consistently stronger in the low/mid bars matching real
-   music's spectral shape). An initial guess of 6.0 (based only on the
-   tone test) left real music looking sparse -- 15.0 puts typical
-   content at a lively-but-not-maxed height and peaks near full. */
-#define VIZ_SCALE 15.0
+   300ms while real music played through this machine's speakers) --
+   NOT guessed, three separate rounds so far, each against genuinely
+   different real content: a 440Hz test tone (peaked ~0.11); one song
+   (typical ~0.02-0.04, peaks ~0.07-0.09); a second, quieter song
+   (typical ~0.01-0.03, peaks only ~0.04-0.05 -- confirmed directly:
+   "barely see the lines rising on this song"). Real songs vary in
+   loudness/mastering more than a single calibration constant can
+   perfectly cover -- 25.0 is picked to make the quieter song's
+   typical content reach a clearly-visible mid height without
+   over-saturating a louder song's peaks. If a future song still looks
+   too flat or too pinned-at-max, that's this same real tradeoff, not
+   a new bug -- an adaptive/auto-gain scale (tracking a rolling
+   loudness average instead of one fixed constant) would fix it
+   properly but is a bigger change than this pass covers. */
+#define VIZ_SCALE 25.0
 /* How often the capture process is killed and restarted with a fresh,
    truncated file. Bounds disk usage (44100 * 2 bytes/sec * this many
    seconds) and, as an unavoidable side effect, causes a brief real

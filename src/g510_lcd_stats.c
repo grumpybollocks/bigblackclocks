@@ -289,7 +289,22 @@ static void update_media_info(void) {
     g_media_title[0] = 0;
     g_media_artist[0] = 0;
     g_media_elapsed[0] = 0;
-    FILE *p = popen("playerctl metadata --format '{{ title }}\x1f{{ artist }}\x1f{{ position }}\x1f{{ mpris:length }}' 2>/dev/null", "r");
+    /* Real bug found and fixed: querying with no -p flag lets
+       playerctl pick "the first available player" by its own priority
+       order, which on this real KDE desktop picked Brave's own raw
+       MPRIS export over KDE's plasma-browser-integration -- for the
+       exact same YouTube Music tab, Brave's own export reported the
+       generic page title ("YouTube Music", no song name) and an
+       empty artist, while plasma-browser-integration reported the
+       real song title, real artist, AND real album, confirmed side
+       by side with `playerctl -p <name> metadata`. plasma-browser-
+       integration is explicitly preferred first; other real MPRIS
+       players (Spotify, VLC, a differently-named browser instance)
+       still work fine since playerctl falls through the rest of this
+       comma-separated list, then its own normal default, if neither
+       named player exists -- confirmed directly. */
+    FILE *p = popen("playerctl -p plasma-browser-integration,%any metadata "
+                     "--format '{{ title }}\x1f{{ artist }}\x1f{{ position }}\x1f{{ mpris:length }}' 2>/dev/null", "r");
     if (!p) return;
     char line[256] = "";
     if (fgets(line, sizeof(line), p)) {
@@ -1257,14 +1272,33 @@ static void draw_visualizer_element(g15canvas *c, visualizer_t *vz) {
     if (num_segments < 1) num_segments = 1;
     int y2 = vz->y + vz->height - 1;
 
+    /* Direct request, then refined: "the zero positions where the
+       bars rise from... i want to be as long as the display" then
+       "the bottom bar should represent the bars that WOULD rise if
+       the frequency triggered them" -- segmented per-bar-slot blocks
+       (same bar_w/bar_gap spacing real bars use) spanning the full
+       160px LCD width, not one solid undifferentiated strip. Always
+       on, so the widget reads as "present, currently at zero" for
+       every possible bar position the moment playback is idle,
+       whether or not the element's own configured width covers that
+       position. */
+    for (int fx = 0; fx < G15_LCD_WIDTH; fx += bar_w + bar_gap) {
+        int fx2 = fx + bar_w - 1;
+        if (fx2 >= G15_LCD_WIDTH) fx2 = G15_LCD_WIDTH - 1;
+        g15r_pixelBox(c, fx, y2 - seg_h + 1, fx2, y2, G15_COLOR_BLACK, 1, 1);
+    }
+
     for (int b = 0; b < num_bars; b++) {
         double level = g_viz_bars[b] * VIZ_SCALE; /* VIZ_SCALE calibrated against real playing audio, see audio_visualizer.h */
         if (level > 1.0) level = 1.0;
         int lit = (int)(level * num_segments + 0.5);
         if (lit > num_segments) lit = num_segments;
+        /* Segment 0 is the always-on baseline drawn above -- bars
+           only need to draw segments 1..lit-1 (the RISING part above
+           zero), not re-draw the baseline itself per-bar. */
         int bx1 = vz->x + b * (bar_w + bar_gap);
         int bx2 = bx1 + bar_w - 1;
-        for (int s = 0; s < lit; s++) {
+        for (int s = 1; s < lit; s++) {
             int sy2 = y2 - s * (seg_h + seg_gap);
             int sy1 = sy2 - seg_h + 1;
             if (sy1 < vz->y) break;
