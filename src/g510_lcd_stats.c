@@ -1239,10 +1239,20 @@ static void draw_text_element(g15canvas *c, text_t *tx) {
    that file for why this is player-agnostic (works with Brave,
    Spotify, anything) by construction. */
 static void draw_visualizer_element(g15canvas *c, visualizer_t *vz) {
-    int num_bars = VIZ_NUM_BARS;
-    int seg_h = 3, seg_gap = 1, bar_gap = 1;
-    int bar_w = (vz->width - (num_bars - 1) * bar_gap) / num_bars;
-    if (bar_w < 1) bar_w = 1;
+    /* Bar width and segment height are FIXED, small, and thin ("more
+       lines, less think" -- direct report) -- dragging the element
+       bigger adds MORE bars/segments at this same fixed thinness,
+       rather than the old behavior of a fixed bar/segment COUNT just
+       getting fatter to fill a bigger box (which is why "i dragged it
+       longer and did not extend" -- there was visibly nothing new to
+       see, just bigger blocks). num_bars is capped at VIZ_NUM_BARS,
+       the real number of frequency bins the DFT engine computes (see
+       audio_visualizer.h) -- more on-screen columns than that would
+       just repeat data, not show more real detail. */
+    int bar_w = 2, bar_gap = 1, seg_h = 2, seg_gap = 1;
+    int num_bars = vz->width / (bar_w + bar_gap);
+    if (num_bars > VIZ_NUM_BARS) num_bars = VIZ_NUM_BARS;
+    if (num_bars < 1) num_bars = 1;
     int num_segments = vz->height / (seg_h + seg_gap);
     if (num_segments < 1) num_segments = 1;
     int y2 = vz->y + vz->height - 1;
@@ -1284,6 +1294,12 @@ static void draw_custom_screen(g15canvas *c, int screen_num) {
 }
 
 int main(int argc, char **argv) {
+    /* Clean up the visualizer's forked parec child on shutdown --
+       real leak found in testing: without this, every service
+       restart orphaned a parec process forever. */
+    signal(SIGTERM, viz_signal_cleanup);
+    signal(SIGINT, viz_signal_cleanup);
+
     /* Three-tier font fallback chain, none of it fatal:
        1. font_path() -- the primary bundled/converted label font.
        2. If that's missing, unparseable, OR loads but fails
@@ -1345,8 +1361,28 @@ int main(int argc, char **argv) {
     while (1) {
         g15canvas canvas;
         g15r_initCanvas(&canvas);
-        update_net_speed();
-        update_media_info();
+
+        /* Direct report after actually watching it live: "i can only
+           see 4 max 5 line and barely moves" -- root cause: this whole
+           loop only ran once per second (sleep(1) below), far too slow
+           for a visualizer to look alive. update_net_speed()/
+           update_media_info() don't need to run any faster than that
+           (network throughput and playerctl's D-Bus query are both
+           genuinely expensive to poll faster, and nothing downstream
+           needs sub-second freshness for either) -- decoupled onto
+           their own ~1s cadence via a wall-clock check, independent of
+           how fast the outer loop itself now spins when a visualizer
+           is actually on screen (see below). update_visualizer() runs
+           every iteration regardless -- it's cheap (a few thousand
+           multiply-adds, see audio_visualizer.h) and IS the thing that
+           needs to be fast. */
+        static time_t last_slow_update = 0;
+        time_t now_t = time(NULL);
+        if (difftime(now_t, last_slow_update) >= 1.0) {
+            update_net_speed();
+            update_media_info();
+            last_slow_update = now_t;
+        }
         update_visualizer();
 
         int screen = read_screen();
@@ -1359,7 +1395,16 @@ int main(int argc, char **argv) {
         if (screen >= 2 && screen <= 5) {
             draw_custom_screen(&canvas, screen);
             send_frame(&canvas);
-            sleep(1);
+            /* Only speed up the redraw loop for screens that actually
+               HAVE a visualizer on them -- a plain sensor/text/image
+               screen gains nothing from redrawing 10x/sec and would
+               just burn CPU and USB bandwidth for no visible change. */
+            custom_screen_t *cs = &custom_screens[screen - 2];
+            if (cs->visualizer_count > 0) {
+                usleep(100000); /* ~10fps -- fast enough to read as "alive," matches a typical simple visualizer's refresh rate */
+            } else {
+                sleep(1);
+            }
             continue;
         }
 

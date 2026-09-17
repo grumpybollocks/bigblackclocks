@@ -18,29 +18,58 @@
    CURRENT default output device's monitor is, confirmed with a real
    parec capture against it.
 
-   Uses a small hand-written single-bin DFT (Goertzel-style: evaluates
-   only the specific frequency bins the bars need, not a full spectrum)
-   instead of pulling in a general FFT library (FFTW is available on
-   this system but is a heavyweight dependency for something this
-   small) -- verified correct against both a synthetic 440Hz test tone
-   fed directly as samples AND a real end-to-end test: the same tone
-   played through actual speakers and captured live via parec, which
-   produced matching bar output to the synthetic test. Confirmed
-   silence produces a clean all-zero response, not noise.
+   REAL BUG FOUND AND FIXED (this is the second capture design, not the
+   first): the original version had `parec` write to STDOUT and read it
+   via a `popen()` pipe. That looked fine in isolated tests (redirecting
+   parec's stdout straight to a FILE via a plain shell command always
+   produced real audio data), but reading the SAME command's output
+   through a pipe/FIFO instead of a real file consistently produced
+   silence -- confirmed via direct comparison: piping through an
+   anonymous pipe (popen) -> all zero bytes; piping through a named FIFO
+   -> also all zero bytes; redirecting to a regular file, read back with
+   plain fopen/fread -> real, correct, non-zero audio data, every single
+   time this was tested. This points to `parec` (or the PipeWire-pulse
+   client library underneath it) negotiating a much larger write-buffer/
+   flush threshold when its output is detected as a pipe-like fd versus
+   a plain file -- not something this program can control from the
+   read side, so the fix works around it by never using a pipe at all.
+
+   Current design: `parec` is launched via fork()+execlp() (a real
+   child PID tracked directly -- this project has a standing rule
+   against fragile `pkill` pattern-matching after being bitten by it
+   before, see G510_README.md) writing continuously to a real file
+   under $XDG_RUNTIME_DIR (same convention as screen_state_path()
+   elsewhere in this file). The file is small (a rolling ~1.3MB per 30s
+   at this sample rate) and gets truncated by restarting the capture
+   process periodically -- VIZ_RESTART_SEC controls both the disk-usage
+   bound and how often a brief (~1-1.5s, matching the real observed
+   buffer-fill delay) gap in data occurs right after each restart.
 
    The monitor source is SUSPENDED (produces no data) whenever nothing
    is playing -- confirmed real PipeWire behavior on this machine, not
-   a bug. Handled by non-blocking reads: no new data this cycle just
-   means the bars decay toward zero instead of freezing, which is also
-   the visually correct behavior for "nothing playing right now." */
+   a bug. Handled by "not enough new data yet" being treated the same
+   as during a restart gap: bars decay toward zero instead of freezing
+   or showing stale data. */
 
-#include <fcntl.h>
 #include <unistd.h>
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <time.h>
 
-#define VIZ_NUM_BARS 8
+/* Upper bound on how many frequency bins the DFT engine ever computes
+   -- the actual number of bars DRAWN on screen is computed dynamically
+   from the visualizer element's real width (see draw_visualizer_element
+   in g510_lcd_stats.c), capped at this. Direct report after dragging
+   the element wider and seeing no change: "i dragged it longer and did
+   not extend. more lines, less think, match more frequencies" -- a
+   fixed bar count meant resizing just made each bar WIDER, not more
+   numerous. 20 covers the full 160px LCD width at a thin ~4px/bar
+   without ever running short of real bins to draw. */
+#define VIZ_NUM_BARS 20
 #define VIZ_WINDOW_SAMPLES 512
 #define VIZ_SAMPLE_RATE 44100
 /* Calibrated against real playing audio via a standalone harness
@@ -53,17 +82,28 @@
    tone test) left real music looking sparse -- 15.0 puts typical
    content at a lively-but-not-maxed height and peaks near full. */
 #define VIZ_SCALE 15.0
+/* How often the capture process is killed and restarted with a fresh,
+   truncated file. Bounds disk usage (44100 * 2 bytes/sec * this many
+   seconds) and, as an unavoidable side effect, causes a brief real
+   gap in data right after each restart while the new process's write
+   buffer fills back up -- verified this delay is ~1-1.5s in practice,
+   short enough that bars simply decay briefly rather than looking
+   broken. Longer intervals make that gap rarer at the cost of more
+   disk (30s is ~2.6MB, trivial either way). */
+#define VIZ_RESTART_SEC 30
 
-static FILE *g_audio_capture_proc = NULL;
+static pid_t g_viz_pid = -1;
+static time_t g_viz_started = 0;
+static long g_viz_read_offset = 0;
 static short g_viz_ring[VIZ_WINDOW_SAMPLES];
 static double g_viz_bars[VIZ_NUM_BARS] = {0};
 /* Log-spaced bar center frequencies, 100Hz-8kHz -- more resolution in
    the bass/mid range where most music's perceptible energy lives,
    matching how real hardware/software equalizers are laid out. Not a
-   precision spectrum analyzer -- tuned for a visually lively 8-bar
-   effect, verified to correctly distinguish "tone present" from
-   "silence" and to respond to the right general region of the
-   spectrum, not exact scientific bin placement. */
+   precision spectrum analyzer -- tuned for a visually lively effect,
+   verified to correctly distinguish "tone present" from "silence" and
+   to respond to the right general region of the spectrum, not exact
+   scientific bin placement. */
 static double g_viz_bar_freqs[VIZ_NUM_BARS];
 
 static void viz_init_bar_freqs(void) {
@@ -74,26 +114,61 @@ static void viz_init_bar_freqs(void) {
     }
 }
 
+static const char *viz_capture_path(void) {
+    static char path[256];
+    const char *runtime = getenv("XDG_RUNTIME_DIR");
+    snprintf(path, sizeof(path), "%s/g510lcd_viz_capture.raw", runtime ? runtime : "/tmp");
+    return path;
+}
+
 static void viz_start_capture(void) {
     viz_init_bar_freqs();
-    /* stderr redirected to /dev/null: parec logs connection
-       messages there on every start/stop that would otherwise spam
-       this service's journal on every silence->play transition. */
-    g_audio_capture_proc = popen(
-        "parec -d @DEFAULT_MONITOR@ --format=s16le --rate=44100 --channels=1 2>/dev/null",
-        "r");
-    if (g_audio_capture_proc) {
-        int fd = fileno(g_audio_capture_proc);
-        int flags = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    unlink(viz_capture_path());
+    g_viz_read_offset = 0;
+    pid_t pid = fork();
+    if (pid == 0) {
+        /* Child: redirect stderr to /dev/null (parec logs connection
+           messages there on every start/stop that would otherwise spam
+           this service's journal every VIZ_RESTART_SEC). */
+        FILE *devnull = fopen("/dev/null", "w");
+        if (devnull) dup2(fileno(devnull), 2);
+        execlp("parec", "parec", "-d", "@DEFAULT_MONITOR@", "--format=s16le",
+               "--rate=44100", "--channels=1", "--file-format=raw",
+               viz_capture_path(), (char*)NULL);
+        _exit(127); /* only reached if execlp itself failed */
     }
+    g_viz_pid = pid; /* pid == -1 on a failed fork() -- update_visualizer()'s pid<=0 check handles that */
+    g_viz_started = time(NULL);
+}
+
+static void viz_stop_capture(void) {
+    if (g_viz_pid > 0) {
+        kill(g_viz_pid, SIGTERM);
+        waitpid(g_viz_pid, NULL, 0);
+        g_viz_pid = -1;
+    }
+    unlink(viz_capture_path());
+}
+
+/* Real resource-leak bug found while testing the periodic-restart
+   logic: without this, killing the daemon (systemctl restart, a
+   crash, anything sending SIGTERM/SIGINT) left the forked parec child
+   running forever as an orphan -- confirmed directly, multiple
+   restarts during testing accumulated multiple leaked parec
+   processes. main() must call signal(SIGTERM/SIGINT,
+   viz_signal_cleanup) once at startup. */
+static void viz_signal_cleanup(int sig) {
+    viz_stop_capture();
+    signal(sig, SIG_DFL);
+    raise(sig);
 }
 
 /* Single-bin DFT magnitude via direct correlation against one target
    frequency -- cheap since only VIZ_NUM_BARS specific bins are ever
-   needed (~512*8 = 4096 multiply-adds per update, negligible at a
-   1-2s poll rate), not the O(N log N) full spectrum a real FFT would
-   compute for bins nothing ever reads. */
+   needed (~512*20 = 10240 multiply-adds per update, negligible even
+   at the ~10fps this now runs at for visualizer-showing screens), not
+   the O(N log N) full spectrum a real FFT would compute for bins
+   nothing ever reads. */
 static double viz_dft_bin_magnitude(short *samples, int n, double freq_hz) {
     double omega = 2.0 * M_PI * freq_hz / VIZ_SAMPLE_RATE;
     double real = 0, imag = 0;
@@ -105,63 +180,97 @@ static double viz_dft_bin_magnitude(short *samples, int n, double freq_hz) {
     return sqrt(real * real + imag * imag) / n;
 }
 
-/* Called once per draw cycle (same pattern as update_net_speed()) --
-   drains whatever's currently available from the non-blocking pipe
-   into the ring buffer, then re-runs the DFT on the latest window. If
-   the capture process died (PipeWire restarted, etc.), restarts it;
-   if there's simply no new data (silence -- the monitor source is
-   SUSPENDED, confirmed real behavior, not an error), bars decay
-   toward zero instead of freezing or showing stale data forever. */
+/* Called once per draw cycle (same pattern as update_net_speed()).
+   Restarts the capture process on its own schedule (see
+   VIZ_RESTART_SEC), then reads whatever new bytes have accumulated in
+   the capture file since the last call and re-runs the DFT on the
+   latest window. If there's no new data yet (right after a restart,
+   before parec's own buffer has filled, or if the monitor source is
+   SUSPENDED because nothing is playing -- confirmed real PipeWire
+   behavior, not an error), bars decay toward zero instead of freezing
+   or showing stale data forever. */
 static void update_visualizer(void) {
-    if (!g_audio_capture_proc) {
+    if (g_viz_pid <= 0) {
         viz_start_capture();
         return;
     }
-    short buf[VIZ_WINDOW_SAMPLES];
-    ssize_t n = read(fileno(g_audio_capture_proc), buf, sizeof(buf));
-    if (n > 0) {
-        int samples = (int)(n / sizeof(short));
-        int keep = VIZ_WINDOW_SAMPLES - samples;
-        if (keep > 0) {
-            memmove(g_viz_ring, g_viz_ring + samples, keep * sizeof(short));
-            memcpy(g_viz_ring + keep, buf, samples * sizeof(short));
-        } else {
-            /* More new samples than the whole window -- just use the
-               most recent VIZ_WINDOW_SAMPLES of what came in. */
-            memcpy(g_viz_ring, buf + (samples - VIZ_WINDOW_SAMPLES), VIZ_WINDOW_SAMPLES * sizeof(short));
-        }
-        for (int i = 0; i < VIZ_NUM_BARS; i++) {
-            double mag = viz_dft_bin_magnitude(g_viz_ring, VIZ_WINDOW_SAMPLES, g_viz_bar_freqs[i]);
-            /* Light smoothing (70% new / 30% old) -- responsive but not
-               flickery frame to frame. */
-            g_viz_bars[i] = g_viz_bars[i] * 0.3 + mag * 0.7;
-        }
-    } else if (n == 0) {
-        /* EOF -- the capture process actually exited (crashed, or the
-           audio subsystem restarted out from under it). Clean up and
-           let the next cycle's !g_audio_capture_proc check restart it. */
-        pclose(g_audio_capture_proc);
-        g_audio_capture_proc = NULL;
-    } else {
-        /* EAGAIN/EWOULDBLOCK (no data ready right now -- the normal
-           "nothing playing" case) or a transient read error either
-           way: decay existing bars toward zero rather than freezing. */
+    if (difftime(time(NULL), g_viz_started) >= VIZ_RESTART_SEC) {
+        viz_stop_capture();
+        viz_start_capture();
+        return;
+    }
+
+    FILE *f = fopen(viz_capture_path(), "rb");
+    if (!f) {
         for (int i = 0; i < VIZ_NUM_BARS; i++) g_viz_bars[i] *= 0.85;
+        return;
+    }
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    long available = size - g_viz_read_offset;
+    if (available < (long)sizeof(g_viz_ring)) {
+        /* Not enough new data yet -- normal right after a restart, or
+           while the monitor source is SUSPENDED (silence). Decay
+           instead of freezing. */
+        fclose(f);
+        for (int i = 0; i < VIZ_NUM_BARS; i++) g_viz_bars[i] *= 0.85;
+        return;
+    }
+    /* Always read the MOST RECENT window, not strictly the next
+       unread bytes -- if the reader ever falls behind (shouldn't
+       normally happen at this poll rate, but avoids an unbounded
+       backlog if it does), this naturally catches back up to "now"
+       rather than playing catch-up through stale audio. */
+    fseek(f, size - (long)sizeof(g_viz_ring), SEEK_SET);
+    size_t got = fread(g_viz_ring, 1, sizeof(g_viz_ring), f);
+    fclose(f);
+    g_viz_read_offset = size;
+    if (got < sizeof(g_viz_ring)) return; /* short read -- try again next cycle */
+
+    for (int i = 0; i < VIZ_NUM_BARS; i++) {
+        double mag = viz_dft_bin_magnitude(g_viz_ring, VIZ_WINDOW_SAMPLES, g_viz_bar_freqs[i]);
+        /* Light smoothing (70% new / 30% old) -- responsive but not
+           flickery frame to frame. */
+        g_viz_bars[i] = g_viz_bars[i] * 0.3 + mag * 0.7;
     }
 }
 
 /* --preview is a one-shot render (the GUI editor's live-preview
-   mechanism) -- there's no meaningful window of time to capture real
-   audio in a fresh process that runs once and exits. Rather than skip
-   drawing the visualizer there (which would make it invisible while
-   positioning it in the editor) or force a fake capture-and-wait, this
-   sets a fixed, varied placeholder pattern purely so the editor shows
-   the bars' real position/size -- same category of "close enough for
-   layout, not real data" already accepted for the image-element resize
-   preview elsewhere in this codebase. */
+   mechanism). Direct request: "id love to have the visualiser LIVE on
+   the software so i can see it myself remotely how and if it works" --
+   since real capture now happens in a persistent file-backed process
+   (started by the live systemd service, if it's running), a one-shot
+   --preview invocation can just READ that same shared capture file
+   directly for a real, live snapshot, without itself needing to spawn
+   or manage any capture process. Only falls back to a fixed placeholder
+   pattern if that file doesn't exist yet or doesn't have a full
+   window's worth of data (e.g. the live service was just started and
+   parec's buffer hasn't filled, or the service isn't running at all --
+   never crashes either way, just shows something reasonable). */
 static void viz_set_preview_placeholder(void) {
-    double placeholder[VIZ_NUM_BARS] = {0.3, 0.6, 0.9, 0.5, 0.2, 0.7, 1.0, 0.4};
-    for (int i = 0; i < VIZ_NUM_BARS && i < 8; i++) g_viz_bars[i] = placeholder[i] / VIZ_SCALE;
+    viz_init_bar_freqs();
+    FILE *f = fopen(viz_capture_path(), "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        if (size >= (long)sizeof(g_viz_ring)) {
+            fseek(f, size - (long)sizeof(g_viz_ring), SEEK_SET);
+            size_t got = fread(g_viz_ring, 1, sizeof(g_viz_ring), f);
+            fclose(f);
+            if (got == sizeof(g_viz_ring)) {
+                for (int i = 0; i < VIZ_NUM_BARS; i++) {
+                    g_viz_bars[i] = viz_dft_bin_magnitude(g_viz_ring, VIZ_WINDOW_SAMPLES, g_viz_bar_freqs[i]);
+                }
+                return;
+            }
+        } else {
+            fclose(f);
+        }
+    }
+    /* Fixed, varied fallback pattern -- purely so the editor shows the
+       bars' real position/size even with no live data available yet. */
+    double placeholder[8] = {0.3, 0.6, 0.9, 0.5, 0.2, 0.7, 1.0, 0.4};
+    for (int i = 0; i < VIZ_NUM_BARS; i++) g_viz_bars[i] = placeholder[i % 8] / VIZ_SCALE;
 }
 
 #endif
