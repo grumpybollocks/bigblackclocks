@@ -10,8 +10,13 @@ driven properly from scratch: LCD screen, backlight, and G-key macros.
 
 ## Status, plainly
 
-- **This repo is private.** Not indexed, not fetchable by anyone
-  without an invite.
+- **This repo is meant to be private** — every doc and commit message
+  in its history says so — but an audit on 2026-09-17 found it's
+  actually set to **public** on GitHub right now, and flipping that
+  back needs a manual, explicit action this project treats as a human
+  decision, not something to script through. If you're reading this on
+  GitHub, that flip may not have happened yet — don't assume privacy
+  until someone's actually confirmed the repo settings say so.
 - **Work in progress** (see the table below) — not tagged beyond
   `v1.0`, not packaged for real installs beyond local testing, no
   live-hardware confirmation yet on everything past `v1.0`.
