@@ -1,4 +1,4 @@
-# bigblackclocks
+# Logitech G510s software
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3-blue.svg)
