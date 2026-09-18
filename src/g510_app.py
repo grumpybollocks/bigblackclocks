@@ -2285,21 +2285,33 @@ class MainWindow(QMainWindow):
         re-writes each real data store this app owns, then reads it
         back off disk and checks it actually matches, so "Saved" here
         means "confirmed on disk right now", not just "the write call
-        didn't raise"."""
+        didn't raise". Direct feedback on the first version of this
+        button: "kinda sucks, offers no assurance anything is saved" --
+        a status-bar line at the bottom of the window is too easy to
+        miss entirely. This now pops a modal confirmation dialog (can't
+        be missed, has to be dismissed) that itemizes exactly what got
+        verified PER SCREEN -- also directly answers "does it also save
+        the L screens?": yes, `self.custom_tab.config` already holds
+        every screen (L2-L5) in one dict, saved/reloaded together, so
+        the breakdown below always lists all of them, even ones with 0
+        elements, as visible proof none were silently skipped."""
         problems = []
-        parts = []
+        detail_lines = []
 
-        # 1. Custom Screens (already autosaved on every single edit --
-        # this just re-confirms the CURRENT in-memory state round-trips
-        # through a real disk write/read cleanly).
+        # 1. Custom Screens -- ALL screens (L2, L3, L4, L5) live in one
+        # config dict and save_custom_screens()/load_custom_screens()
+        # always write/read the whole thing together, never a single
+        # screen in isolation, so there's no way for this to silently
+        # save only the currently-open one.
         try:
             save_custom_screens(self.custom_tab.config)
             reloaded = load_custom_screens()
             if reloaded != self.custom_tab.config:
                 problems.append("Custom Screens: saved but didn't read back identically")
             else:
-                n = sum(len(v) for v in self.custom_tab.config.values())
-                parts.append(f"{n} custom-screen element(s)")
+                for screen in sorted(self.custom_tab.config.keys()):
+                    n = len(self.custom_tab.config[screen])
+                    detail_lines.append(f"    {screen}: {n} element(s)")
         except OSError as e:
             problems.append(f"Custom Screens: {e}")
 
@@ -2315,29 +2327,43 @@ class MainWindow(QMainWindow):
             if f"{rgb[0]} {rgb[1]} {rgb[2]}" not in on_disk:
                 problems.append("Backlight: saved but didn't read back identically")
             else:
-                parts.append(f"backlight #{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}")
+                detail_lines.append(f"    Boot color: #{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}")
         except OSError as e:
             problems.append(f"Backlight: {e}")
 
         # 3. Macros -- each one already writes to macros.json the
         # instant it's recorded (no separate in-memory "pending" macro
         # state exists to re-save), so this is a read-back sanity check
-        # only: confirm the file exists and is valid JSON, not silently
-        # corrupted.
+        # only: confirm the file exists, is valid JSON, and count what's
+        # actually assigned per profile.
         try:
+            macro_counts = {}
             if MACROS_FILE.exists():
-                json.loads(MACROS_FILE.read_text())
-            parts.append("macros.json OK")
+                data = json.loads(MACROS_FILE.read_text())
+                for profile, keys in data.items():
+                    if keys:
+                        macro_counts[profile] = len(keys)
+            if macro_counts:
+                for profile in sorted(macro_counts):
+                    detail_lines.append(f"    {profile}: {macro_counts[profile]} macro(s) assigned")
+            else:
+                detail_lines.append("    (no macros assigned yet)")
         except (OSError, json.JSONDecodeError) as e:
             problems.append(f"Macros: {e}")
 
         now = datetime.datetime.now().strftime("%H:%M:%S")
         if problems:
-            msg = "Save FAILED at " + now + ": " + "; ".join(problems)
-            self.status.showMessage("✗ " + msg)
+            msg = "Save FAILED at " + now + ":\n\n" + "\n".join(problems)
+            self.status.showMessage("✗ " + msg.replace("\n", " "))
             QMessageBox.critical(self, "Save failed", msg)
         else:
-            self.status.showMessage(f"✓ Saved & verified on disk at {now} -- " + ", ".join(parts))
+            msg = (
+                f"Verified on disk at {now}:\n\n"
+                "Custom Screens:\n" + "\n".join(detail_lines[:len(self.custom_tab.config)]) + "\n\n"
+                "Backlight + Macros:\n" + "\n".join(detail_lines[len(self.custom_tab.config):])
+            )
+            self.status.showMessage(f"✓ Saved & verified on disk at {now}")
+            QMessageBox.information(self, "Saved", msg)
 
 
 if __name__ == "__main__":
