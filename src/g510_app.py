@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (
     QFileDialog, QInputDialog,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
-from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen
+from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen, QFontMetrics
 import evdev
 from evdev import ecodes
 
@@ -862,6 +862,7 @@ SCREEN_PREVIEW_KEYS = ["L1"] + CUSTOM_SCREEN_KEYS
 MAX_IMAGES_PER_SCREEN = 2  # matches MAX_IMAGES in g510_lcd_stats.c
 MAX_TEXTS_PER_SCREEN = 4  # matches MAX_TEXTS in g510_lcd_stats.c
 MAX_VISUALIZERS_PER_SCREEN = 1  # matches MAX_VISUALIZERS in g510_lcd_stats.c -- only one persistent audio-capture stream exists process-wide, a second visualizer element would just duplicate the same bar data
+CUSTOM_SCREENS_PANEL_WIDTH = 230  # single source of truth -- also used to compute how much a row's label can show before it needs eliding, see refresh_elements_list()
 DEFAULT_VISUALIZER_WIDTH = 70
 DEFAULT_VISUALIZER_HEIGHT = 37
 TEXT_CHAR_PX = 6  # rough estimate for G15_TEXT_SMALL's per-character width -- no real font-metric access from Python for freeform text (same reason sensor elements originally needed the .meta sidecar), but text elements deliberately skip that mechanism (see on_add_text's docstring) so this stays an approximation, not pixel-perfect
@@ -1193,12 +1194,20 @@ class ScreenPreviewCanvas(QWidget):
                          est_w * PREVIEW_SCALE, est_h * PREVIEW_SCALE)
         b = self._bounds.get(self._sensor_rank(index))
         if b and "label_x1" in b:
-            # Real geometry: covers the label through the end of the
-            # bar (if any), so the whole visible element is grabbable,
-            # not just an approximate box that might miss a long label
-            # or a short/long bar.
+            # Real geometry: covers the label through the real end of
+            # the VALUE TEXT (which for bar-style is drawn AFTER the
+            # bar, not the bar's own edge) -- direct report: "the blue
+            # bars... dont contain the whole variable element(name)".
+            # value_x2 is a REAL measured width from the C side (see
+            # measure_builtin_text_width() in g510_lcd_stats.c) -- the
+            # old code used bar_x2 (missing bar-style's own trailing
+            # value text entirely) or a fixed "+30" guess for
+            # number-style, which badly undershot real long values
+            # like a song title. Falls back to the old guess only if
+            # value_x2 is somehow missing (e.g. a stale .meta from
+            # before this field existed).
             x1, y1 = b["label_x1"], b["label_y1"]
-            x2 = b.get("bar_x2", b["label_x2"] + 30)  # +30 is a light pad for the value text on number-style, which has no measured width either
+            x2 = b.get("value_x2", b["label_x2"] + 30)
             y2 = max(b["label_y2"], b.get("bar_y2", 0))
             return QRect(x1 * PREVIEW_SCALE, y1 * PREVIEW_SCALE,
                          (x2 - x1) * PREVIEW_SCALE, (y2 - y1) * PREVIEW_SCALE)
@@ -1554,7 +1563,7 @@ class CustomScreensTab(QWidget):
 
         panel = QWidget()
         panel.setObjectName("Panel")
-        panel.setFixedWidth(230)
+        panel.setFixedWidth(CUSTOM_SCREENS_PANEL_WIDTH)
         panel_layout = QVBoxLayout()
 
         title = QLabel("Custom Screens")
@@ -2163,6 +2172,24 @@ class CustomScreensTab(QWidget):
                 text = QLabel(f"{label} – {el['style']}")
                 text.setToolTip(f"x={el['x']} y={el['y']}" + (f" width={el.get('width', 40)}" if el.get("style") == "bar" else ""))
             text.setStyleSheet("font-size: 11px;")
+            # Real regression found by direct testing: a long row label
+            # (e.g. "Media: Song Title – number") could push the ✕
+            # remove button clean off the visible panel -- "the remove
+            # vutton is gone from the sloppy gui". Elide with Qt's own
+            # real font-metric-based truncation (not a guessed character
+            # count) to whatever's actually left after the size/remove
+            # buttons, so the row's total width can never exceed the
+            # panel and the remove button is always reachable. Full text
+            # stays in the tooltip.
+            has_size_btn = el.get("kind") in ("sensor", "text")
+            reserved = 24 + 20 + (56 if has_size_btn else 0)  # remove_btn + panel margins/spacing + size_btn if present
+            elide_budget = max(20, CUSTOM_SCREENS_PANEL_WIDTH - reserved)
+            full_text = text.text()
+            text.setText(QFontMetrics(text.font()).elidedText(full_text, Qt.ElideRight, elide_budget))
+            if text.toolTip():
+                text.setToolTip(full_text + "\n" + text.toolTip())
+            else:
+                text.setToolTip(full_text)
             row.addWidget(text)
             row.addStretch()
             if el.get("kind") in ("sensor", "text"):

@@ -560,6 +560,55 @@ static void draw_label(g15canvas *c, int x, int y, const char *label) {
     }
 }
 
+/* Real bugs found by direct user testing: (1) long value text (a real
+   song title) ran straight off the visible screen edge with no
+   fallback -- "theres no fallback plan for when the text is too long.
+   it just exits screen"; (2) the GUI's drag hit-box for that same text
+   was a fixed +30px guess (see the old bounds-sidecar code below),
+   nowhere near covering a real long title -- "the blue bars... dont
+   contain the whole variable element(name)".
+
+   Root cause of BOTH: g15r_testG15FontWidth() (the library's only
+   width-query function) only works on a LOADED CUSTOM g15font like
+   label_font -- confirmed by re-checking /usr/include/libg15render.h,
+   not assumed -- it has no equivalent for the BUILT-IN G15_TEXT_SMALL/
+   MED/LARGE/HUGE fonts that sensor values and freeform text actually
+   render with. This measures those by rendering to a throwaway
+   scratch canvas and scanning for the rightmost lit pixel -- the same
+   render-and-scan technique already used elsewhere in this project
+   (the clock face's roman-numeral positions), not a new invented
+   hack. */
+static int measure_builtin_text_width(const char *s, int font_size) {
+    if (!s[0]) return 0;
+    g15canvas scratch;
+    g15r_initCanvas(&scratch);
+    g15r_renderString(&scratch, (unsigned char*)s, 0, font_size, 0, 0);
+    int max_x = -1;
+    for (int y = 0; y < G15_LCD_HEIGHT; y++)
+        for (int x = 0; x < G15_LCD_WIDTH; x++)
+            if (g15r_getPixel(&scratch, x, y) && x > max_x) max_x = x;
+    return max_x + 1; /* -1 (nothing lit) + 1 = 0, correct for an all-blank string */
+}
+
+/* Truncates `s` in place (a single trailing '.' marks a real cut, not
+   a rendering glitch) until it measures at or under `max_w` pixels at
+   `font_size`. No-op if it already fits. Cheap: measuring shrinks by
+   one character each try, and these strings are at most a few dozen
+   characters (SENSOR value buffers are 32 bytes, freeform TEXT content
+   is 48). */
+static void truncate_builtin_text(char *s, int font_size, int max_w) {
+    if (max_w < 0) max_w = 0;
+    if (measure_builtin_text_width(s, font_size) <= max_w) return;
+    int len = (int)strlen(s);
+    while (len > 0) {
+        len--;
+        s[len] = '.';
+        s[len + 1] = 0;
+        if (measure_builtin_text_width(s, font_size) <= max_w) return;
+    }
+    s[0] = 0; /* not even one character + '.' fits -- genuinely no room, show nothing rather than garbage */
+}
+
 static void draw_row(g15canvas *c, int y, const char *label, int pct,
                       const char *pct_str, const char *amount, int pct_y_nudge) {
     draw_label(c, LABEL_X, y, label);
@@ -1144,6 +1193,12 @@ typedef struct {
     int label_x1, label_y1, label_x2, label_y2; /* covers just the label glyph */
     int is_bar;
     int bar_x1, bar_x2, bar_y1, bar_y2;           /* only valid if is_bar */
+    int value_x2; /* real measured right edge of the value text (after
+                      any truncation) -- replaces an old fixed "+30px"
+                      guess that badly undershot real long values like
+                      a song title, confirmed directly: "the blue
+                      bars... dont contain the whole variable element
+                      (name)" */
 } element_bounds_t;
 
 static element_bounds_t g_element_bounds[MAX_ELEMENTS];
@@ -1168,6 +1223,17 @@ static void draw_element(g15canvas *c, element_t *el) {
         b->is_bar = 0;
     }
 
+    /* Real bug found by direct testing: a long value (a real song
+       title, via MEDIA_TITLE) rendered straight past the 160px screen
+       edge with no fallback -- "it just exits screen". Truncated here
+       (measuring the BUILT-IN font's real width via render+scan,
+       since it has no width-query API -- see
+       measure_builtin_text_width()) before either draw path below
+       ever renders it, so nothing this function draws can overflow. */
+    int avail = G15_LCD_WIDTH - value_x;
+    truncate_builtin_text(disp, el->font_size, avail);
+    int value_w = measure_builtin_text_width(disp, el->font_size);
+
     /* "bar" only ever applies to a sensor with an honest 0-100 scale
        (a true percent, or a temperature via the same 0-90C convention
        already used on the built-in stats screen). Anything else silently
@@ -1175,15 +1241,23 @@ static void draw_element(g15canvas *c, element_t *el) {
     if (strcmp(el->style, "bar") == 0 && (def->is_percent || def->is_temp) && pct_for_bar >= 0) {
         int bar_x1 = value_x;
         int bar_x2 = bar_x1 + el->width;
+        /* The value text after a bar starts past the bar itself, not
+           at value_x -- truncate/measure again against the real
+           remaining space from THERE, not the pre-bar budget above. */
+        int bar_avail = G15_LCD_WIDTH - (bar_x2 + 4);
+        truncate_builtin_text(disp, el->font_size, bar_avail);
+        value_w = measure_builtin_text_width(disp, el->font_size);
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
         g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, bar_x2 + 4, el->y);
         if (b) {
             b->is_bar = 1;
             b->bar_x1 = bar_x1; b->bar_x2 = bar_x2;
             b->bar_y1 = el->y; b->bar_y2 = el->y + BAR_H;
+            b->value_x2 = bar_x2 + 4 + value_w;
         }
     } else {
         g15r_renderString(c, (unsigned char*)disp, 0, el->font_size, value_x, el->y);
+        if (b) b->value_x2 = value_x + value_w;
     }
 }
 
@@ -1203,12 +1277,12 @@ static void write_bounds_meta(const char *outpath) {
     for (int i = 0; i < g_element_bounds_count; i++) {
         element_bounds_t *b = &g_element_bounds[i];
         if (b->is_bar) {
-            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d bar_x1=%d bar_y1=%d bar_x2=%d bar_y2=%d\n",
+            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d bar_x1=%d bar_y1=%d bar_x2=%d bar_y2=%d value_x2=%d\n",
                     i, b->label_x1, b->label_y1, b->label_x2, b->label_y2,
-                    b->bar_x1, b->bar_y1, b->bar_x2, b->bar_y2);
+                    b->bar_x1, b->bar_y1, b->bar_x2, b->bar_y2, b->value_x2);
         } else {
-            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d\n",
-                    i, b->label_x1, b->label_y1, b->label_x2, b->label_y2);
+            fprintf(f, "%d label_x1=%d label_y1=%d label_x2=%d label_y2=%d value_x2=%d\n",
+                    i, b->label_x1, b->label_y1, b->label_x2, b->label_y2, b->value_x2);
         }
     }
     fclose(f);
@@ -1238,6 +1312,9 @@ static void draw_image_element(g15canvas *c, image_t *im) {
 }
 
 static void draw_text_element(g15canvas *c, text_t *tx) {
+    /* Same real overflow bug/fix as draw_element()'s value text --
+       freeform TEXT elements had no width limit either. */
+    truncate_builtin_text(tx->content, tx->font_size, G15_LCD_WIDTH - tx->x);
     g15r_renderString(c, (unsigned char*)tx->content, 0, tx->font_size, tx->x, tx->y);
 }
 
@@ -1254,17 +1331,24 @@ static void draw_text_element(g15canvas *c, text_t *tx) {
    that file for why this is player-agnostic (works with Brave,
    Spotify, anything) by construction. */
 static void draw_visualizer_element(g15canvas *c, visualizer_t *vz) {
-    /* Bar width and segment height are FIXED, small, and thin ("more
-       lines, less think" -- direct report) -- dragging the element
-       bigger adds MORE bars/segments at this same fixed thinness,
-       rather than the old behavior of a fixed bar/segment COUNT just
-       getting fatter to fill a bigger box (which is why "i dragged it
-       longer and did not extend" -- there was visibly nothing new to
-       see, just bigger blocks). num_bars is capped at VIZ_NUM_BARS,
-       the real number of frequency bins the DFT engine computes (see
-       audio_visualizer.h) -- more on-screen columns than that would
-       just repeat data, not show more real detail. */
-    int bar_w = 2, bar_gap = 1, seg_h = 2, seg_gap = 1;
+    /* Bar/segment size are FIXED constants -- dragging the element
+       bigger adds MORE bars/segments at this same fixed size, rather
+       than a fixed bar/segment COUNT just getting fatter to fill a
+       bigger box (direct report: "i dragged it longer and did not
+       extend" -- there was visibly nothing new to see, just bigger
+       blocks). num_bars is capped at VIZ_NUM_BARS, the real number of
+       frequency bins the DFT engine computes (see audio_visualizer.h)
+       -- more on-screen columns than that would just repeat data, not
+       show more real detail.
+
+       bar_w doubled 2->4 per direct request ("a bit more wide, maybe
+       make every single line, a double line") -- each bar/baseline
+       segment reads as visibly bolder/thicker now, not just thin
+       hairlines. seg_h left at 2 (unchanged) since "wide"/"double
+       line" was about the bars' horizontal thickness, not vertical
+       segment resolution -- that was a separate, already-addressed
+       complaint ("more lines to match more frequencies"). */
+    int bar_w = 4, bar_gap = 1, seg_h = 2, seg_gap = 1;
     int num_bars = vz->width / (bar_w + bar_gap);
     if (num_bars > VIZ_NUM_BARS) num_bars = VIZ_NUM_BARS;
     if (num_bars < 1) num_bars = 1;

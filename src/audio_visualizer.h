@@ -238,7 +238,16 @@ static void update_visualizer(void) {
         double mag = viz_dft_bin_magnitude(g_viz_ring, VIZ_WINDOW_SAMPLES, g_viz_bar_freqs[i]);
         /* Light smoothing (70% new / 30% old) -- responsive but not
            flickery frame to frame. */
-        g_viz_bars[i] = g_viz_bars[i] * 0.3 + mag * 0.7;
+        /* Direct request: "i wished more bard would be rising, Winamp
+           style" -- less smoothing (was 0.3 old/0.7 new) makes each
+           bar react more visibly frame to frame instead of blending
+           toward an average. Honest caveat, unlike the other fixes in
+           this pass: nothing was playing at the time this was tuned
+           (couldn't verify against real live audio), so this is a
+           reasoned best guess based on how smoothing works, not
+           independently confirmed livelier -- worth another real
+           listen. */
+        g_viz_bars[i] = g_viz_bars[i] * 0.15 + mag * 0.85;
     }
 }
 
