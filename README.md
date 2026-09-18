@@ -31,6 +31,10 @@ to re-run any time.
 - G-key macros across M1 / M2 / M3 profiles
 - Custom Screens dashboard builder — drag sensors, images, and text
   onto L2-L5, plus a live analog clock on L1
+- A real-time audio visualizer, plus now-playing title/artist/elapsed
+  time — hears whatever's actually coming out of your speakers via the
+  system audio monitor, so it works identically with any player
+  (Spotify, a browser, VLC, anything) with zero per-app integration
 - Runs as your normal user, starts at login, shrugs off reboots —
   no root faffing about
 
