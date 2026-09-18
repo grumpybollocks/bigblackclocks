@@ -31,14 +31,27 @@ to re-run any time.
 - G-key macros across M1 / M2 / M3 profiles
 - Custom Screens dashboard builder — drag sensors, images, and text
   onto L2-L5, plus a live analog clock on L1
-- A real-time audio visualizer, plus now-playing title/artist/elapsed
-  time — hears whatever's actually coming out of your speakers via the
-  system audio monitor, so it works identically with any player
-  (Spotify, a browser, VLC, anything) with zero per-app integration
+- A little Winamp on your keyboard — bouncing equalizer bars for
+  whatever's playing, plus the song title, artist, and elapsed time
 - Runs as your normal user, starts at login, shrugs off reboots —
   no root faffing about
 
 ![G510s Control app — v1](docs/screenshots/g510s-control-v1.png)
+
+## The audio visualizer
+
+Drop a visualizer onto any of the L2-L5 screens and the LCD turns into
+a tiny live equalizer — bars that actually bounce to the music,
+alongside the song title, artist, and a running "1:23 / 3:45" clock.
+
+It doesn't hook into Spotify, or your browser, or any app in
+particular — it just listens to whatever's coming out of your
+speakers, the same way a physical VU meter would. That means it works
+identically with Spotify, YouTube in a browser tab, VLC, a game,
+literally anything, with nothing to configure and nothing that can
+fall out of sync with "what app is currently playing." Resize it like
+any other element and it fills the extra space with more bars, not
+just bigger ones.
 
 ## How it works
 
