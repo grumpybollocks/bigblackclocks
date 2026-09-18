@@ -289,46 +289,93 @@ static void update_media_info(void) {
     g_media_title[0] = 0;
     g_media_artist[0] = 0;
     g_media_elapsed[0] = 0;
-    /* Real bug found and fixed: querying with no -p flag lets
-       playerctl pick "the first available player" by its own priority
-       order, which on this real KDE desktop picked Brave's own raw
-       MPRIS export over KDE's plasma-browser-integration -- for the
-       exact same YouTube Music tab, Brave's own export reported the
-       generic page title ("YouTube Music", no song name) and an
-       empty artist, while plasma-browser-integration reported the
-       real song title, real artist, AND real album, confirmed side
-       by side with `playerctl -p <name> metadata`. plasma-browser-
-       integration is explicitly preferred first; other real MPRIS
-       players (Spotify, VLC, a differently-named browser instance)
-       still work fine since playerctl falls through the rest of this
-       comma-separated list, then its own normal default, if neither
-       named player exists -- confirmed directly. */
-    FILE *p = popen("playerctl -p plasma-browser-integration,%any metadata "
-                     "--format '{{ title }}\x1f{{ artist }}\x1f{{ position }}\x1f{{ mpris:length }}' 2>/dev/null", "r");
+    /* Real bug found and fixed (title/artist source): querying with no
+       -p flag lets playerctl pick "the first available player" by its
+       own priority order, which on this real KDE desktop picked
+       Brave's own raw MPRIS export over KDE's plasma-browser-
+       integration -- for the exact same YouTube Music tab, Brave's
+       own export reported the generic page title ("YouTube Music", no
+       song name) and an empty artist, while plasma-browser-integration
+       reported the real song title, real artist, AND real album,
+       confirmed side by side with `playerctl -p <name> metadata`.
+
+       Second real bug found and fixed (position/length source): direct
+       report -- "the timer never resets when a new song plays. it
+       continues where it left off, total time also gets just added
+       time." Confirmed by polling both players side by side while a
+       YouTube Music playlist played: plasma-browser-integration's own
+       `position`/`mpris:length` climbed PAST a single track's real
+       duration (a "song" reporting position=9:46 against a
+       length=11:05 that kept growing every poll) -- it doesn't cleanly
+       reset those two fields between tracks in an autoplay
+       playlist/mix. Meanwhile Brave's own raw MPRIS export (tied
+       directly to the real underlying <video> element's currentTime/
+       duration, not a derived value from the browser-integration
+       bridge) stayed correctly bounded to the real per-track duration
+       the whole time, confirmed over the same window.
+
+       Fix: one single `-a` (all players) query instead of two, so this
+       isn't 2x the subprocess/D-Bus cost. Title/artist still come from
+       whichever line is plasma-browser-integration (best metadata,
+       same reasoning as above) or the first line if that player isn't
+       running. Position/length come from whichever line is NOT
+       plasma-browser-integration (the raw player, tied to the actual
+       media element) when one exists, else fall back to the same line
+       used for title/artist -- correct for the common non-browser case
+       (Spotify, VLC) where there's only one real source to begin with,
+       already covered by bugcheck_media_sensors.py's real end-to-end
+       test. */
+    FILE *p = popen("playerctl -a metadata --format "
+                     "'{{ playerName }}\x1f{{ title }}\x1f{{ artist }}\x1f{{ position }}\x1f{{ mpris:length }}' 2>/dev/null", "r");
     if (!p) return;
-    char line[256] = "";
-    if (fgets(line, sizeof(line), p)) {
+
+    char title_buf[64] = "", artist_buf[48] = "";
+    long pos_us = -1, len_us = -1;
+    int have_title = 0, have_time = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), p)) {
         char *nl = strchr(line, '\n');
         if (nl) *nl = 0;
-        char *title = line;
+        char *player = line;
+        char *title = strchr(player, '\x1f');
+        if (!title) continue;
+        *title = 0; title++;
         char *artist = strchr(title, '\x1f');
-        if (artist) { *artist = 0; artist++; }
-        char *pos_str = artist ? strchr(artist, '\x1f') : NULL;
-        if (pos_str) { *pos_str = 0; pos_str++; }
-        char *len_str = pos_str ? strchr(pos_str, '\x1f') : NULL;
-        if (len_str) { *len_str = 0; len_str++; }
-        strncpy(g_media_title, title, sizeof(g_media_title) - 1);
-        if (artist) strncpy(g_media_artist, artist, sizeof(g_media_artist) - 1);
-        if (pos_str && len_str) {
-            long pos_us = atol(pos_str);
-            long len_us = atol(len_str);
-            int pos_s = (int)(pos_us / 1000000);
-            int len_s = (int)(len_us / 1000000);
-            snprintf(g_media_elapsed, sizeof(g_media_elapsed), "%d:%02d/%d:%02d",
-                     pos_s / 60, pos_s % 60, len_s / 60, len_s % 60);
+        if (!artist) continue;
+        *artist = 0; artist++;
+        char *pos_str = strchr(artist, '\x1f');
+        if (!pos_str) continue;
+        *pos_str = 0; pos_str++;
+        char *len_str = strchr(pos_str, '\x1f');
+        if (!len_str) continue;
+        *len_str = 0; len_str++;
+
+        int is_plasma = (strcmp(player, "plasma-browser-integration") == 0);
+
+        if (!have_title || is_plasma) {
+            strncpy(title_buf, title, sizeof(title_buf) - 1);
+            title_buf[sizeof(title_buf) - 1] = 0;
+            strncpy(artist_buf, artist, sizeof(artist_buf) - 1);
+            artist_buf[sizeof(artist_buf) - 1] = 0;
+            have_title = 1;
+        }
+        if (!have_time || !is_plasma) {
+            pos_us = atol(pos_str);
+            len_us = atol(len_str);
+            have_time = 1;
+            if (!is_plasma) have_time = 2; /* a real non-bridge source found -- stop letting plasma's line override it */
         }
     }
     pclose(p);
+
+    strncpy(g_media_title, title_buf, sizeof(g_media_title) - 1);
+    strncpy(g_media_artist, artist_buf, sizeof(g_media_artist) - 1);
+    if (have_time && pos_us >= 0 && len_us >= 0) {
+        int pos_s = (int)(pos_us / 1000000);
+        int len_s = (int)(len_us / 1000000);
+        snprintf(g_media_elapsed, sizeof(g_media_elapsed), "%d:%02d/%d:%02d",
+                 pos_s / 60, pos_s % 60, len_s / 60, len_s % 60);
+    }
 }
 
 static void format_kbps(double kbps, char *out, size_t outlen) {
@@ -596,6 +643,14 @@ static int measure_builtin_text_width(const char *s, int font_size) {
    one character each try, and these strings are at most a few dozen
    characters (SENSOR value buffers are 32 bytes, freeform TEXT content
    is 48). */
+/* Truncation math is exact (verified by direct stress-testing across
+   every font size and a wide range of avail/unicode inputs -- never
+   measured a single pixel past max_w), but exact-to-the-edge still
+   reads as "touching/going off the screen" on a real physical LCD.
+   A few px of breathing room makes a truncated value look deliberately
+   cut off, not broken. */
+#define TEXT_EDGE_MARGIN 3
+
 static void truncate_builtin_text(char *s, int font_size, int max_w) {
     if (max_w < 0) max_w = 0;
     if (measure_builtin_text_width(s, font_size) <= max_w) return;
@@ -1230,7 +1285,7 @@ static void draw_element(g15canvas *c, element_t *el) {
        since it has no width-query API -- see
        measure_builtin_text_width()) before either draw path below
        ever renders it, so nothing this function draws can overflow. */
-    int avail = G15_LCD_WIDTH - value_x;
+    int avail = G15_LCD_WIDTH - TEXT_EDGE_MARGIN - value_x;
     truncate_builtin_text(disp, el->font_size, avail);
     int value_w = measure_builtin_text_width(disp, el->font_size);
 
@@ -1244,7 +1299,7 @@ static void draw_element(g15canvas *c, element_t *el) {
         /* The value text after a bar starts past the bar itself, not
            at value_x -- truncate/measure again against the real
            remaining space from THERE, not the pre-bar budget above. */
-        int bar_avail = G15_LCD_WIDTH - (bar_x2 + 4);
+        int bar_avail = G15_LCD_WIDTH - TEXT_EDGE_MARGIN - (bar_x2 + 4);
         truncate_builtin_text(disp, el->font_size, bar_avail);
         value_w = measure_builtin_text_width(disp, el->font_size);
         draw_slim_bar(c, bar_x1, bar_x2, el->y, BAR_H, (int)pct_for_bar);
@@ -1314,7 +1369,7 @@ static void draw_image_element(g15canvas *c, image_t *im) {
 static void draw_text_element(g15canvas *c, text_t *tx) {
     /* Same real overflow bug/fix as draw_element()'s value text --
        freeform TEXT elements had no width limit either. */
-    truncate_builtin_text(tx->content, tx->font_size, G15_LCD_WIDTH - tx->x);
+    truncate_builtin_text(tx->content, tx->font_size, G15_LCD_WIDTH - TEXT_EDGE_MARGIN - tx->x);
     g15r_renderString(c, (unsigned char*)tx->content, 0, tx->font_size, tx->x, tx->y);
 }
 
