@@ -875,27 +875,35 @@ typedef struct {
     const char *label;  /* short on-screen label (fits the tiny font) */
     int is_percent;      /* naturally 0-100 -- bar-capable, no scale guessing */
     int is_temp;          /* temperature in C -- bar-capable via the existing 0-90C convention */
+    int auto_center;    /* horizontally centered on the display instead of
+                            anchored at the element's configured x -- direct
+                            request: "id like the song name and artist always
+                            auto centre, text lenghts differ from song to
+                            song" (a fixed x can't center text whose width
+                            changes every track). Left unset (0, C's default
+                            for a trailing struct initializer field) on every
+                            other row below on purpose. */
 } sensor_def_t;
 
 static const sensor_def_t SENSORS[] = {
-    {"CPU_PCT",          "CPU",  1, 0},
-    {"CPU_GHZ",          "GHZ",  0, 0},
-    {"CPU_TEMP",         "TEMP", 0, 1},
-    {"RAM_PCT",          "RAM",  1, 0},
-    {"RAM_AMOUNT",       "AMT",  0, 0},
-    {"VRAM_PCT",         "VRAM", 1, 0},
-    {"VRAM_AMOUNT",      "AMT",  0, 0},
-    {"MAXTEMP",          "MAXT", 0, 1},
-    {"GPU_PCT",          "GPU",  1, 0},
-    {"GPU_EDGE_TEMP",    "EDGE", 0, 1},
-    {"GPU_HOTSPOT_TEMP", "HOT",  0, 1},
-    {"GPU_VRAM_TEMP",    "VMEM", 0, 1},
-    {"SWAP_PCT",         "SWAP", 1, 0},
-    {"DISK_ROOT_PCT",    "DISK", 1, 0},
-    {"DISK_SECONDARY_PCT","DSK2", 1, 0},
-    {"UPTIME",           "UPTM", 0, 0},
-    {"NET_DOWN",         "DOWN", 0, 0},
-    {"NET_UP",           "UPLD", 0, 0},
+    {"CPU_PCT", "CPU", 1, 0, 0},
+    {"CPU_GHZ", "GHZ", 0, 0, 0},
+    {"CPU_TEMP", "TEMP", 0, 1, 0},
+    {"RAM_PCT", "RAM", 1, 0, 0},
+    {"RAM_AMOUNT", "AMT", 0, 0, 0},
+    {"VRAM_PCT", "VRAM", 1, 0, 0},
+    {"VRAM_AMOUNT", "AMT", 0, 0, 0},
+    {"MAXTEMP", "MAXT", 0, 1, 0},
+    {"GPU_PCT", "GPU", 1, 0, 0},
+    {"GPU_EDGE_TEMP", "EDGE", 0, 1, 0},
+    {"GPU_HOTSPOT_TEMP", "HOT", 0, 1, 0},
+    {"GPU_VRAM_TEMP", "VMEM", 0, 1, 0},
+    {"SWAP_PCT", "SWAP", 1, 0, 0},
+    {"DISK_ROOT_PCT", "DISK", 1, 0, 0},
+    {"DISK_SECONDARY_PCT", "DSK2", 1, 0, 0},
+    {"UPTIME", "UPTM", 0, 0, 0},
+    {"NET_DOWN", "DOWN", 0, 0, 0},
+    {"NET_UP", "UPLD", 0, 0, 0},
     /* Direct request: "when selected, i dont want them to say time:
        xx:xx or date : xxxx / drop the lables" -- an empty label is
        safe here without any new code path: label_text_width("") is 0
@@ -903,20 +911,20 @@ static const sensor_def_t SENSORS[] = {
        renders nothing, and value_x = el->x + 0 + 4 just leaves a
        small natural margin instead of "TIME "/"DATE " prefixing the
        actual value. */
-    {"TIME",             "",     0, 0},
-    {"DATE",             "",     0, 0},
+    {"TIME", "", 0, 0, 0},
+    {"DATE", "", 0, 0, 0},
     /* Empty labels, same reasoning as TIME/DATE above -- the content
        itself (a song title, an artist name, "1:23/3:45") is already
        self-descriptive, and every pixel matters on this screen. */
-    {"MEDIA_TITLE",       "",    0, 0},
-    {"MEDIA_ARTIST",      "",    0, 0},
-    {"MEDIA_ELAPSED",     "",    0, 0},
-    {"MB_TEMP1",         "MB1",  0, 1},
-    {"MB_TEMP2",         "MB2",  0, 1},
-    {"MB_TEMP3",         "MB3",  0, 1},
-    {"MB_TEMP4",         "MB4",  0, 1},
-    {"MB_TEMP5",         "MB5",  0, 1},
-    {"MB_TEMP6",         "MB6",  0, 1},
+    {"MEDIA_TITLE",       "",    0, 0, 1},
+    {"MEDIA_ARTIST",      "",    0, 0, 1},
+    {"MEDIA_ELAPSED", "", 0, 0, 0},
+    {"MB_TEMP1", "MB1", 0, 1, 0},
+    {"MB_TEMP2", "MB2", 0, 1, 0},
+    {"MB_TEMP3", "MB3", 0, 1, 0},
+    {"MB_TEMP4", "MB4", 0, 1, 0},
+    {"MB_TEMP5", "MB5", 0, 1, 0},
+    {"MB_TEMP6", "MB6", 0, 1, 0},
 };
 
 static const sensor_def_t *find_sensor(const char *key) {
@@ -1289,6 +1297,22 @@ static void draw_element(g15canvas *c, element_t *el) {
     truncate_builtin_text(disp, el->font_size, avail);
     int value_w = measure_builtin_text_width(disp, el->font_size);
 
+    if (def->auto_center) {
+        /* Truncate against the FULL centered budget (not the
+           x-anchored one above -- a centered string can use space on
+           BOTH sides of the configured x, so re-measure/re-truncate
+           against the whole display instead of just what's to the
+           right of value_x) then re-center every draw, since a
+           different track's title/artist is a different width every
+           time. el->x (dragging up/down) still moves the row's Y --
+           only X is forced to center. */
+        truncate_builtin_text(disp, el->font_size, G15_LCD_WIDTH - 2 * TEXT_EDGE_MARGIN);
+        value_w = measure_builtin_text_width(disp, el->font_size);
+        value_x = (G15_LCD_WIDTH - value_w) / 2;
+        if (value_x < TEXT_EDGE_MARGIN) value_x = TEXT_EDGE_MARGIN;
+        if (b) { b->label_x1 = value_x; b->label_x2 = value_x; }
+    }
+
     /* "bar" only ever applies to a sensor with an honest 0-100 scale
        (a true percent, or a temperature via the same 0-90C convention
        already used on the built-in stats screen). Anything else silently
@@ -1574,7 +1598,15 @@ int main(int argc, char **argv) {
                just burn CPU and USB bandwidth for no visible change. */
             custom_screen_t *cs = &custom_screens[screen - 2];
             if (cs->visualizer_count > 0) {
-                usleep(100000); /* ~10fps -- fast enough to read as "alive," matches a typical simple visualizer's refresh rate */
+                /* Was ~10fps (100ms). Direct request: "i need the
+                   visualizer respons faster" -- the real bottleneck
+                   turned out to be capture latency (see
+                   --latency-msec in audio_visualizer.h, ~0.7s fixed
+                   down to ~50ms), but once that's fixed this draw
+                   cadence becomes the next-largest source of lag, so
+                   it's doubled too. 20fps is still cheap for a tiny
+                   160x43 monochrome frame over USB. */
+                usleep(50000); /* ~20fps */
             } else {
                 sleep(1);
             }

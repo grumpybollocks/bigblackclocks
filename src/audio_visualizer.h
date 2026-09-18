@@ -69,7 +69,7 @@
    fixed bar count meant resizing just made each bar WIDER, not more
    numerous. 20 covers the full 160px LCD width at a thin ~4px/bar
    without ever running short of real bins to draw. */
-#define VIZ_NUM_BARS 20
+#define VIZ_NUM_BARS 32
 #define VIZ_WINDOW_SAMPLES 512
 #define VIZ_SAMPLE_RATE 44100
 /* Calibrated against real playing audio via a standalone harness
@@ -139,9 +139,18 @@ static void viz_start_capture(void) {
            this service's journal every VIZ_RESTART_SEC). */
         FILE *devnull = fopen("/dev/null", "w");
         if (devnull) dup2(fileno(devnull), 2);
+        /* --latency-msec is a real, directly measured fix, not a
+           guess: without it, this capture file was observed growing
+           in ~65KB (~0.7s of audio) bursts roughly every 0.6-0.7s --
+           confirmed by polling its size every 50ms -- meaning every
+           bar the LCD drew was reading audio up to ~0.7s stale, far
+           more lag than the 100ms draw loop itself. With
+           --latency-msec=50 the same test showed near-continuous
+           small writes (a few KB) almost every poll cycle instead.
+           Direct request: "i need the visualizer respons faster". */
         execlp("parec", "parec", "-d", "@DEFAULT_MONITOR@", "--format=s16le",
                "--rate=44100", "--channels=1", "--file-format=raw",
-               viz_capture_path(), (char*)NULL);
+               "--latency-msec=50", viz_capture_path(), (char*)NULL);
         _exit(127); /* only reached if execlp itself failed */
     }
     g_viz_pid = pid; /* pid == -1 on a failed fork() -- update_visualizer()'s pid<=0 check handles that */
