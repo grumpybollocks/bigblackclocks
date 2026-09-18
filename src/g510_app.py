@@ -15,13 +15,14 @@ import sys
 import json
 import shutil
 import subprocess
+import datetime
 from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QGridLayout, QComboBox, QPushButton, QLabel,
     QMessageBox, QDialog, QLineEdit, QSpinBox, QFrame, QScrollArea,
-    QFileDialog, QInputDialog,
+    QFileDialog, QInputDialog, QStatusBar,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QRect, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QColor, QPainter, QPen, QFontMetrics
@@ -2238,15 +2239,105 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("G510 LCD Control")
         self.setStyleSheet(STYLESHEET)
 
+        self.keyboard_tab = KeyboardTab()
+        self.custom_tab = CustomScreensTab()
+
         tabs = QTabWidget()
-        tabs.addTab(KeyboardTab(), "Backlight + G-Keys")
-        tabs.addTab(CustomScreensTab(), "Custom Screens")
+        tabs.addTab(self.keyboard_tab, "Backlight + G-Keys")
+        tabs.addTab(self.custom_tab, "Custom Screens")
         self.setCentralWidget(tabs)
+
+        # Direct request: "make me a save button/feature o dont trust
+        # my settings will survive reboots" -- every individual action
+        # in this app (dragging an element, clicking Apply/Set as
+        # Default, recording a macro) already writes straight to disk
+        # immediately, so there was never actually a missing autosave
+        # path to add. What WAS missing is visible proof of that: this
+        # button re-saves everything explicitly, then reads each file
+        # straight back off disk and compares it against what's
+        # supposed to be there -- a real verification, not just "the
+        # write call didn't throw" -- and reports exactly what it
+        # confirmed (or, honestly, what failed) in the status bar. A
+        # QToolBar (not a wrapper around centralWidget()) so it's
+        # visible from every tab without disturbing anything that
+        # assumes centralWidget() is the QTabWidget itself.
+        toolbar = self.addToolBar("Save")
+        toolbar.setMovable(False)
+        self.save_all_btn = QPushButton("\U0001F4BE  Save All Settings Now")
+        self.save_all_btn.setObjectName("saveAllBtn")
+        self.save_all_btn.clicked.connect(self.on_save_all)
+        toolbar.addWidget(self.save_all_btn)
+
+        self.status = QStatusBar()
+        self.setStatusBar(self.status)
+        self.status.showMessage(
+            "Every change here already saves to disk immediately -- "
+            "use Save All Settings Now any time you want that verified."
+        )
 
         # A hardcoded resize() goes stale the moment tab content's
         # natural size differs (bit us on the sibling G910 app) --
         # adjustSize() sizes the window to what's actually in it.
         self.adjustSize()
+
+    def on_save_all(self):
+        """Real disk round-trip verification, not a cosmetic no-op:
+        re-writes each real data store this app owns, then reads it
+        back off disk and checks it actually matches, so "Saved" here
+        means "confirmed on disk right now", not just "the write call
+        didn't raise"."""
+        problems = []
+        parts = []
+
+        # 1. Custom Screens (already autosaved on every single edit --
+        # this just re-confirms the CURRENT in-memory state round-trips
+        # through a real disk write/read cleanly).
+        try:
+            save_custom_screens(self.custom_tab.config)
+            reloaded = load_custom_screens()
+            if reloaded != self.custom_tab.config:
+                problems.append("Custom Screens: saved but didn't read back identically")
+            else:
+                n = sum(len(v) for v in self.custom_tab.config.values())
+                parts.append(f"{n} custom-screen element(s)")
+        except OSError as e:
+            problems.append(f"Custom Screens: {e}")
+
+        # 2. Backlight boot default (set-backlight-color.sh). Apply and
+        # Set as Default both already write this immediately -- this
+        # re-persists whatever color is CURRENTLY shown/pending so even
+        # an in-progress pick gets a real boot-default, then verifies
+        # the exact RGB triple is really in the file on disk.
+        try:
+            rgb = self.keyboard_tab._pending_rgb
+            set_as_default(rgb)
+            on_disk = DEFAULTS_SCRIPT_DATA_DIR.read_text()
+            if f"{rgb[0]} {rgb[1]} {rgb[2]}" not in on_disk:
+                problems.append("Backlight: saved but didn't read back identically")
+            else:
+                parts.append(f"backlight #{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}")
+        except OSError as e:
+            problems.append(f"Backlight: {e}")
+
+        # 3. Macros -- each one already writes to macros.json the
+        # instant it's recorded (no separate in-memory "pending" macro
+        # state exists to re-save), so this is a read-back sanity check
+        # only: confirm the file exists and is valid JSON, not silently
+        # corrupted.
+        try:
+            if MACROS_FILE.exists():
+                json.loads(MACROS_FILE.read_text())
+            parts.append("macros.json OK")
+        except (OSError, json.JSONDecodeError) as e:
+            problems.append(f"Macros: {e}")
+
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        if problems:
+            msg = "Save FAILED at " + now + ": " + "; ".join(problems)
+            self.status.showMessage("✗ " + msg)
+            QMessageBox.critical(self, "Save failed", msg)
+        else:
+            self.status.showMessage(f"✓ Saved & verified on disk at {now} -- " + ", ".join(parts))
 
 
 if __name__ == "__main__":

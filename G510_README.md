@@ -176,6 +176,8 @@ Uses a preset-color dropdown (`COLOR_RGB` dict) rather than a live color picker 
 
 The two systemd --user services are `enable`d, so they autostart at every login. `hid_lg_g15` (the kernel driver all of this depends on) is a mainline upstream driver, ships in every Manjaro kernel package — nothing here is tied to today's specific kernel version.
 
+**"Save All Settings Now" button** — direct request: "make me a save button/feature o dont trust my settings will survive reboots". Every real edit in this app (dragging/resizing a Custom Screens element, clicking Apply or Set as Default, recording a macro) already writes straight to `DATA_DIR` immediately — there was no missing autosave path to add. What was missing was visible proof of that. The button (top toolbar, visible from either tab) re-saves the current Custom Screens config and backlight boot-default, then reads each one straight back off disk and compares it against what's supposed to be there — a real round-trip verification, not just "the write call didn't throw" — and reports exactly what it confirmed (or, honestly, what failed) in the status bar.
+
 ## Media Info + Audio Visualizer (L2-L5, draggable like any other element)
 
 Three new sensor keys (`MEDIA_TITLE`, `MEDIA_ARTIST`, `MEDIA_ELAPSED`) and a new "visualizer" element kind, addable via the Custom Screens editor same as any sensor/text/image.
