@@ -14,8 +14,8 @@ USB/HID traffic directly instead.
 ## Download & Install
 
 ```
-git clone https://github.com/grumpybollocks/bigblackclocks.git
-cd bigblackclocks
+git clone https://github.com/grumpybollocks/g510s-control.git
+cd g510s-control
 ./install.sh
 ```
 
