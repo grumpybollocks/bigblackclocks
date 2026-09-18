@@ -88,10 +88,6 @@ for the full history) — no G910 *file*, branch, or tag has lived on
   details, every bug hit and fixed, font conversion, udev rules.
 - [`G510_CUSTOM_SCREENS_HOWTO.md`](G510_CUSTOM_SCREENS_HOWTO.md) — how
   to actually use the Custom Screens editor.
-- [`READY_FOR_ANYONE.md`](READY_FOR_ANYONE.md) — does this work for
-  anyone besides us, not just on our own machines?
-- [`BRANCHES.md`](BRANCHES.md) — every branch and tag in this repo,
-  explained.
 
 ---
 
@@ -104,12 +100,10 @@ personal:
 - The app can show free space on a second drive over its LCD like any
   other sensor, on request — fully optional, shows "N/A" gracefully on
   any setup that doesn't have one.
-- Built by grumpybollocks and Claude, working through it together —
-  including a sibling app for the Logitech G910 (see "Not the repo
-  you're after?" above) that started out alongside this one before the
-  split. That history predates the split and lives on in this repo's
-  own commit log even though the G910 app's files themselves have
-  moved on.
+- This started out alongside a sibling app for the Logitech G910 (see
+  "Not the repo you're after?" above) before the split. That history
+  predates the split and lives on in this repo's own commit log even
+  though the G910 app's files themselves have moved on.
 - "wtf are the blue squares for?" is a genuine, verbatim piece of user
   feedback that shipped an actual UI fix (resize handles now only show
   up when you're hovering near them, not all at once) — which is as
